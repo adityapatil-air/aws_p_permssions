@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ShipFile Design System - Professional cloud storage theme */
+
+@layer base {
+  :root {
+    /* Core colors - Professional blue/teal palette */
+    --background: 0 0% 100%;
+    --foreground: 214 31% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 214 31% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 214 31% 8%;
+
+    /* Primary - Professional blue */
+    --primary: 210 100% 45%;
+    --primary-foreground: 0 0% 100%;
+    --primary-light: 210 100% 85%;
+    --primary-dark: 210 100% 35%;
+
+    /* Secondary - Light blue */
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 214 31% 8%;
+
+    /* Muted tones */
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent - Teal highlight */
+    --accent: 180 100% 45%;
+    --accent-foreground: 0 0% 100%;
+    --accent-light: 180 100% 85%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 210 100% 45%;
+
+    /* Custom design tokens */
+    --gradient-primary: linear-gradient(135deg, hsl(210 100% 45%) 0%, hsl(180 100% 45%) 100%);
+    --gradient-secondary: linear-gradient(135deg, hsl(210 40% 98%) 0%, hsl(210 40% 96%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(210 100% 50%) 0%, hsl(180 100% 50%) 50%, hsl(210 100% 45%) 100%);
+    
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-card: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    
+    --transition-smooth: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 214 31% 8%;
+    --foreground: 0 0% 98%;
+
+    --card: 214 31% 10%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 214 31% 10%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 210 100% 60%;
+    --primary-foreground: 0 0% 98%;
+    --primary-light: 210 100% 90%;
+    --primary-dark: 210 100% 40%;
+
+    --secondary: 214 31% 15%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 214 31% 15%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 180 100% 55%;
+    --accent-foreground: 0 0% 98%;
+    --accent-light: 180 100% 90%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 214 31% 20%;
+    --input: 214 31% 20%;
+    --ring: 210 100% 60%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
