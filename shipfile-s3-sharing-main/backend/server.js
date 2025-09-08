@@ -574,6 +574,60 @@ app.get('/api/buckets/:bucketName/files', async (req, res) => {
   }
 });
 
+// Preview file (inline view)
+app.get('/api/preview/:bucketName/*', async (req, res) => {
+  const { bucketName } = req.params;
+  const fileKey = req.params[0];
+  const { userEmail } = req.query;
+
+  try {
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!bucket) {
+      return res.status(404).send('Bucket not found');
+    }
+
+    // Basic permission check - if userEmail provided, verify access
+    if (userEmail && bucket.owner_email !== userEmail) {
+      const member = await new Promise((resolve) => {
+        db.get('SELECT permissions FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
+          resolve(row);
+        });
+      });
+      
+      if (!member) {
+        return res.status(403).send('Access denied');
+      }
+    }
+
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+
+    const decodedFileKey = decodeURIComponent(fileKey);
+    const command = new GetObjectCommand({ Bucket: bucketName, Key: decodedFileKey });
+    const response = await s3Client.send(command);
+    
+    res.setHeader('Content-Type', response.ContentType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'inline');
+    
+    response.Body.pipe(res);
+
+  } catch (error) {
+    console.error('Preview error:', error);
+    res.status(500).send('Preview failed');
+  }
+});
+
 // Download files/folders
 app.post('/api/download', checkPermission('download'), async (req, res) => {
   const { bucketName, items, userEmail } = req.body;

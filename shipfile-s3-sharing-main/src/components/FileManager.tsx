@@ -574,6 +574,85 @@ export default function FileManager() {
     setShowNewFolder(true);
   };
 
+  const handlePreviewFile = (file) => {
+    if (file.type === 'folder') return;
+    
+    const fileExt = file.fileType?.toLowerCase();
+    const previewableTypes = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'txt', 'html', 'css', 'js', 'json'];
+    
+    if (!previewableTypes.includes(fileExt)) {
+      alert(`Preview not available for ${fileExt?.toUpperCase() || 'this'} files. Use download to view the file.`);
+      return;
+    }
+    
+    // Generate preview URL with encoded file path
+    const encodedFileId = encodeURIComponent(file.id);
+    const previewUrl = `http://localhost:3001/api/preview/${currentBucket}/${encodedFileId}?userEmail=${encodeURIComponent(currentUser?.email || '')}`;
+    window.open(previewUrl, '_blank');
+  };
+
+  const handleDownloadSingle = async (file) => {
+    if (!hasPermission('download')) {
+      alert('You do not have permission to perform DOWNLOAD on this bucket. Please contact the owner for access.');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://localhost:3001/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bucketName: currentBucket,
+          items: [{ key: file.id, name: file.name, type: file.type }],
+          userEmail: currentUser?.email
+        })
+      });
+      
+      if (!response.ok) throw new Error('Download failed');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download failed:', error);
+      alert('Download failed');
+    }
+  };
+
+  const handleShareSingle = async (file) => {
+    if (!hasPermission('share')) {
+      alert('You do not have permission to perform SHARE on this bucket. Please contact the owner for access.');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://localhost:3001/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bucketName: currentBucket,
+          items: [{ key: file.id, name: file.name, type: file.type }],
+          shareType: 'limited',
+          expiryHours: 24,
+          userEmail: currentUser?.email
+        })
+      });
+      
+      if (!response.ok) throw new Error('Failed to generate share link');
+      
+      const data = await response.json();
+      navigator.clipboard.writeText(data.shareUrl);
+      alert('Share link copied to clipboard!');
+    } catch (error) {
+      console.error('Share failed:', error);
+      alert('Failed to generate share link');
+    }
+  };
+
   // Load user data on component mount
   React.useEffect(() => {
     const memberData = localStorage.getItem('currentMember');
@@ -791,13 +870,32 @@ export default function FileManager() {
                         <TableCell>{file.modified}</TableCell>
                         <TableCell>
                           <div className="flex space-x-1">
-                            <Button variant="ghost" size="sm">
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="sm">
+                            {file.type === 'file' && (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => handlePreviewFile(file)}
+                                title="Preview"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => handleDownloadSingle(file)}
+                              disabled={!hasPermission('download')}
+                              title="Download"
+                            >
                               <Download className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="sm">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => handleShareSingle(file)}
+                              disabled={!hasPermission('share')}
+                              title="Share"
+                            >
                               <Share className="h-4 w-4" />
                             </Button>
                           </div>
