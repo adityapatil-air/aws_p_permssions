@@ -13,6 +13,7 @@ import OwnerBucketSetup from "./components/OwnerBucketSetup";
 import OwnerDashboard from "./components/OwnerDashboard";
 import FileManager from "./components/FileManager";
 import AcceptInvite from "./components/AcceptInvite";
+import SharedFolder from "./components/SharedFolder";
 
 const queryClient = new QueryClient();
 
@@ -31,6 +32,7 @@ const App = () => (
           <Route path="/owner-dashboard" element={<OwnerDashboard />} />
           <Route path="/file-manager" element={<FileManager />} />
           <Route path="/accept-invite/:token" element={<AcceptInvite />} />
+          <Route path="/shared-folder/:shareId" element={<SharedFolder />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

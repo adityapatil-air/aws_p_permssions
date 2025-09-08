@@ -646,7 +646,12 @@ export default function FileManager() {
       
       const data = await response.json();
       navigator.clipboard.writeText(data.shareUrl);
-      alert('Share link copied to clipboard!');
+      
+      if (file.type === 'folder') {
+        alert('Folder share link copied to clipboard! Recipients can browse and download files from this folder.');
+      } else {
+        alert('File share link copied to clipboard!');
+      }
     } catch (error) {
       console.error('Share failed:', error);
       alert('Failed to generate share link');
