@@ -108,7 +108,9 @@ export default function AcceptInvite() {
       const memberData = {
         email: inviteData.email,
         bucketName: data.bucketName,
-        permissions: inviteData.permissions
+        permissions: inviteData.permissions,
+        scopeType: data.scopeType || 'entire',
+        scopeFolders: data.scopeFolders || '[]'
       };
       localStorage.setItem('currentMember', JSON.stringify(memberData));
       

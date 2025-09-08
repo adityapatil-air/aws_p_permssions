@@ -293,6 +293,10 @@ export default function FileManager() {
       const ownerData = localStorage.getItem('currentOwner');
       const memberData = localStorage.getItem('currentMember');
       
+      console.log('=== LOAD FOLDERS DEBUG ===');
+      console.log('ownerData:', ownerData);
+      console.log('memberData:', memberData);
+      
       if (ownerData) {
         // Owner can see all folders
         const owner = JSON.parse(ownerData);
@@ -304,18 +308,24 @@ export default function FileManager() {
         try {
           const member = JSON.parse(memberData);
           console.log('Member data:', member);
+          console.log('Member scopeType:', member.scopeType);
+          console.log('Member scopeFolders raw:', member.scopeFolders);
           
           if (member.scopeType === 'specific' || member.scopeType === 'nested') {
             let accessibleFolders = [];
             
             // Handle different data formats
             if (typeof member.scopeFolders === 'string') {
-              accessibleFolders = JSON.parse(member.scopeFolders);
+              try {
+                accessibleFolders = JSON.parse(member.scopeFolders);
+              } catch (e) {
+                console.error('Failed to parse scopeFolders:', e);
+              }
             } else if (Array.isArray(member.scopeFolders)) {
               accessibleFolders = member.scopeFolders;
             }
             
-            console.log('Accessible folders:', accessibleFolders);
+            console.log('Final accessible folders:', accessibleFolders);
             setAvailableFolders(accessibleFolders || []);
           } else {
             setAvailableFolders([]);

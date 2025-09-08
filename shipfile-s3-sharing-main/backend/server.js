@@ -970,7 +970,9 @@ app.post('/api/invite/:token/accept', async (req, res) => {
             res.json({ 
               message: 'Account created successfully',
               bucketName: invite.bucket_name,
-              email: invite.email
+              email: invite.email,
+              scopeType: invite.scope_type,
+              scopeFolders: invite.scope_folders
             });
           });
         }
