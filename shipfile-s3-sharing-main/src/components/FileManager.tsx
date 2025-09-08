@@ -81,7 +81,9 @@ export default function FileManager() {
     uploadViewAll: false,
     deleteFiles: false,
     generateLinks: false,
-    createFolder: false
+    createFolder: false,
+    deleteOwnFiles: false,
+    inviteMembers: false
   });
   const [scopeType, setScopeType] = useState('entire');
   const [availableFolders, setAvailableFolders] = useState([]);
@@ -289,12 +291,42 @@ export default function FileManager() {
   const loadFolders = async () => {
     try {
       const ownerData = localStorage.getItem('currentOwner');
-      if (!ownerData) return;
+      const memberData = localStorage.getItem('currentMember');
       
-      const owner = JSON.parse(ownerData);
-      const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/folders?ownerEmail=${encodeURIComponent(owner.email)}`);
-      const folders = await response.json();
-      setAvailableFolders(folders);
+      if (ownerData) {
+        // Owner can see all folders
+        const owner = JSON.parse(ownerData);
+        const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/folders?ownerEmail=${encodeURIComponent(owner.email)}`);
+        const folders = await response.json();
+        setAvailableFolders(folders);
+      } else if (memberData) {
+        // Member can only see their accessible folders
+        try {
+          const member = JSON.parse(memberData);
+          console.log('Member data:', member);
+          
+          if (member.scopeType === 'specific' || member.scopeType === 'nested') {
+            let accessibleFolders = [];
+            
+            // Handle different data formats
+            if (typeof member.scopeFolders === 'string') {
+              accessibleFolders = JSON.parse(member.scopeFolders);
+            } else if (Array.isArray(member.scopeFolders)) {
+              accessibleFolders = member.scopeFolders;
+            }
+            
+            console.log('Accessible folders:', accessibleFolders);
+            setAvailableFolders(accessibleFolders || []);
+          } else {
+            setAvailableFolders([]);
+          }
+        } catch (error) {
+          console.error('Error parsing member data:', error);
+          setAvailableFolders([]);
+        }
+      } else {
+        setAvailableFolders([]);
+      }
     } catch (error) {
       console.error('Failed to load folders:', error);
     }
@@ -333,7 +365,9 @@ export default function FileManager() {
         uploadViewAll: false,
         deleteFiles: false,
         generateLinks: false,
-        createFolder: false
+        createFolder: false,
+        deleteOwnFiles: false,
+        inviteMembers: false
       });
       setScopeType('entire');
       setSelectedFolders([]);
@@ -492,7 +526,7 @@ export default function FileManager() {
       case 'createFolder':
         return userPermissions.createFolder;
       case 'invite':
-        return false; // Only owners can invite
+        return userPermissions.inviteMembers;
       default:
         return false;
     }
@@ -712,7 +746,7 @@ export default function FileManager() {
                       <TableHead className="w-12">
                         <input
                           type="checkbox"
-                          checked={selectedFiles.length === files.length}
+                          checked={selectedFiles.length > 0 && selectedFiles.length === files.length}
                           onChange={handleSelectAll}
                         />
                       </TableHead>
@@ -999,6 +1033,30 @@ export default function FileManager() {
                     onChange={(e) => setInvitePermissions(prev => ({...prev, generateLinks: e.target.checked}))}
                   />
                   <span className="text-sm">Generate Share Links</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={invitePermissions.createFolder}
+                    onChange={(e) => setInvitePermissions(prev => ({...prev, createFolder: e.target.checked}))}
+                  />
+                  <span className="text-sm">Create Folders</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={invitePermissions.deleteOwnFiles}
+                    onChange={(e) => setInvitePermissions(prev => ({...prev, deleteOwnFiles: e.target.checked}))}
+                  />
+                  <span className="text-sm">Delete Own Files</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={invitePermissions.inviteMembers}
+                    onChange={(e) => setInvitePermissions(prev => ({...prev, inviteMembers: e.target.checked}))}
+                  />
+                  <span className="text-sm">Invite Members</span>
                 </label>
               </div>
             </div>

@@ -38,6 +38,8 @@ export default function AcceptInvite() {
       if (permissions.deleteFiles) activePermissions.push("Can Delete Files");
       if (permissions.generateLinks) activePermissions.push("Can Generate Share Links");
       if (permissions.createFolder) activePermissions.push("Can Create Folders");
+      if (permissions.deleteOwnFiles) activePermissions.push("Can Delete Own Files");
+      if (permissions.inviteMembers) activePermissions.push("Can Invite Members");
       
       return activePermissions.length > 0 ? activePermissions : ["No permissions assigned"];
     } catch {
@@ -101,6 +103,15 @@ export default function AcceptInvite() {
       }
 
       setAccepted(true);
+      
+      // Store member data in localStorage
+      const memberData = {
+        email: inviteData.email,
+        bucketName: data.bucketName,
+        permissions: inviteData.permissions
+      };
+      localStorage.setItem('currentMember', JSON.stringify(memberData));
+      
       setTimeout(() => {
         navigate(`/file-manager?bucket=${data.bucketName}`);
       }, 2000);

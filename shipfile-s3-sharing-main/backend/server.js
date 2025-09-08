@@ -168,7 +168,10 @@ const checkPermission = (action) => {
             hasPermission = permissions.viewDownload || permissions.uploadViewAll;
             break;
           case 'delete':
-            hasPermission = permissions.deleteFiles;
+            hasPermission = permissions.deleteFiles || permissions.deleteOwnFiles;
+            break;
+          case 'deleteOwn':
+            hasPermission = permissions.deleteOwnFiles;
             break;
           case 'share':
             hasPermission = permissions.generateLinks;
@@ -177,12 +180,21 @@ const checkPermission = (action) => {
             hasPermission = permissions.createFolder;
             break;
           case 'invite':
-            hasPermission = false;
+            hasPermission = permissions.inviteMembers;
             break;
         }
         
         if (!hasPermission) {
-          return res.status(403).json({ error: `You do not have permission to perform ${action.toUpperCase()} on this bucket. Please contact the owner for access.` });
+          let errorMsg = `You do not have permission to perform ${action.toUpperCase()} on this bucket. Please contact the owner for access.`;
+          if (action === 'invite') {
+            errorMsg = 'You do not have permission to invite members. Please contact the owner for access.';
+          }
+          return res.status(403).json({ error: errorMsg });
+        }
+        
+        // For invite action, store member permissions for validation
+        if (action === 'invite') {
+          req.memberPermissions = { permissions, scopeType: member.scope_type, scopeFolders: JSON.parse(member.scope_folders || '[]') };
         }
         
         // For operations that involve specific files/folders, check folder access
@@ -824,6 +836,31 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
   const { bucketName, email, permissions, scopeType, scopeFolders, userEmail } = req.body;
   
   try {
+    // Check if member is trying to grant permissions they don't have
+    if (req.memberPermissions) {
+      const memberPerms = req.memberPermissions.permissions;
+      const memberScopeType = req.memberPermissions.scopeType;
+      const memberScopeFolders = req.memberPermissions.scopeFolders;
+      
+      // Check each permission being granted
+      for (const [perm, value] of Object.entries(permissions)) {
+        if (value && !memberPerms[perm]) {
+          return res.status(403).json({ error: `You can't grant permissions higher than your own. You don't have '${perm}' permission.` });
+        }
+      }
+      
+      // Check scope restrictions
+      if (scopeType === 'specific' && memberScopeType === 'specific') {
+        const requestedFolders = scopeFolders || [];
+        const invalidFolders = requestedFolders.filter(folder => !memberScopeFolders.includes(folder));
+        if (invalidFolders.length > 0) {
+          return res.status(403).json({ error: `You can't grant access to folders you don't have access to: ${invalidFolders.join(', ')}` });
+        }
+      } else if (scopeType === 'entire' && memberScopeType !== 'entire') {
+        return res.status(403).json({ error: 'You can\'t grant entire bucket access when you have limited access.' });
+      }
+    }
+    
     db.get('SELECT * FROM organizations WHERE bucket_name = ?', [bucketName], async (err, org) => {
       if (err || !org) {
         return res.status(404).json({ error: 'Organization not found for this bucket' });
