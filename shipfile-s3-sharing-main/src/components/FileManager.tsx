@@ -99,9 +99,64 @@ export default function FileManager() {
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
-  const filteredFiles = files
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [allFiles, setAllFiles] = useState([]);
+  const [isLoadingAllFiles, setIsLoadingAllFiles] = useState(false);
+
+  // Debounce search term
+  React.useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  // Load all files from all folders for search
+  const loadAllFiles = async () => {
+    if (isLoadingAllFiles || allFiles.length > 0) return;
+    
+    setIsLoadingAllFiles(true);
+    try {
+      let userEmail = currentUser?.email;
+      if (!userEmail) {
+        const memberData = localStorage.getItem('currentMember');
+        const ownerData = localStorage.getItem('currentOwner');
+        if (memberData) {
+          userEmail = JSON.parse(memberData).email;
+        } else if (ownerData) {
+          userEmail = JSON.parse(ownerData).email;
+        }
+      }
+
+      const params = new URLSearchParams();
+      if (userEmail) params.append('userEmail', userEmail);
+      params.append('recursive', 'true');
+
+      const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/files/all?${params.toString()}`);
+      const data = await response.json();
+      setAllFiles(data);
+    } catch (error) {
+      console.error('Failed to load all files:', error);
+    } finally {
+      setIsLoadingAllFiles(false);
+    }
+  };
+
+  // Load all files when search is initiated
+  React.useEffect(() => {
+    if (debouncedSearchTerm.trim().length > 0) {
+      loadAllFiles();
+    }
+  }, [debouncedSearchTerm]);
+
+  // Use all files for search, current folder files for normal view
+  const searchFiles = debouncedSearchTerm.trim().length > 0 ? allFiles : files;
+  
+  const filteredFiles = searchFiles
     .filter(file => {
-      const matchesSearch = file.name.toLowerCase().includes(searchTerm.toLowerCase());
+      // Case-insensitive partial matching
+      const matchesSearch = file.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
       const matchesFilter = filterType === 'all' || 
         (filterType === 'folders' && file.type === 'folder') ||
         (filterType === 'images' && ['jpg', 'jpeg', 'png', 'gif'].includes(file.fileType || '')) ||
@@ -997,12 +1052,19 @@ export default function FileManager() {
                         <TableCell>
                           <div className="flex items-center space-x-2">
                             {getFileIcon(file.type, file.fileType)}
-                            <span 
-                              className={file.type === 'folder' ? 'cursor-pointer hover:text-blue-600' : ''}
-                              onClick={() => file.type === 'folder' && handleFolderClick(file.name)}
-                            >
-                              {file.name}
-                            </span>
+                            <div>
+                              <span 
+                                className={file.type === 'folder' ? 'cursor-pointer hover:text-blue-600' : ''}
+                                onClick={() => file.type === 'folder' && handleFolderClick(file.name)}
+                              >
+                                {file.name}
+                              </span>
+                              {debouncedSearchTerm && file.folderPath && (
+                                <div className="text-xs text-gray-500">
+                                  📁 {file.folderPath}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell>{file.size || '-'}</TableCell>
@@ -1059,6 +1121,13 @@ export default function FileManager() {
                         </TableCell>
                       </TableRow>
                     ))}
+                    {filteredFiles.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-gray-500 py-8">
+                          {debouncedSearchTerm ? 'No files found' : 'This folder is empty'}
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               ) : (

@@ -423,6 +423,93 @@ app.post('/api/folders', checkPermission('createFolder'), async (req, res) => {
   }
 });
 
+// Get all files recursively from all folders
+app.get('/api/buckets/:bucketName/files/all', async (req, res) => {
+  const { bucketName } = req.params;
+  const { userEmail } = req.query;
+
+  try {
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!bucket) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+
+    // Get all objects in bucket (no delimiter for recursive)
+    const command = new ListObjectsV2Command({ 
+      Bucket: bucketName,
+      MaxKeys: 1000
+    });
+    const response = await s3Client.send(command);
+
+    const items = [];
+
+    if (response.Contents) {
+      response.Contents.forEach(obj => {
+        if (!obj.Key.endsWith('/')) { // Only files, not folder markers
+          const fileName = obj.Key.split('/').pop();
+          const folderPath = obj.Key.includes('/') ? obj.Key.substring(0, obj.Key.lastIndexOf('/')) : '';
+          
+          items.push({
+            id: obj.Key,
+            name: fileName,
+            type: 'file',
+            size: `${(obj.Size / 1024 / 1024).toFixed(2)} MB`,
+            modified: obj.LastModified.toISOString().split('T')[0],
+            fileType: fileName.split('.').pop(),
+            folderPath: folderPath
+          });
+        }
+      });
+    }
+
+    // Apply permission filtering
+    if (userEmail && bucket.owner_email !== userEmail) {
+      const member = await new Promise((resolve) => {
+        db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
+          resolve(row);
+        });
+      });
+
+      if (member && (member.scope_type === 'specific' || member.scope_type === 'nested')) {
+        const allowedFolders = JSON.parse(member.scope_folders || '[]');
+        const filteredItems = items.filter(item => {
+          if (!item.folderPath) return false; // Root files not allowed for scoped users
+          
+          if (member.scope_type === 'specific') {
+            return allowedFolders.some(folder => item.folderPath === folder || item.folderPath.startsWith(folder + '/'));
+          } else if (member.scope_type === 'nested') {
+            return allowedFolders.some(folder => 
+              item.folderPath.startsWith(folder) || folder.startsWith(item.folderPath)
+            );
+          }
+          return false;
+        });
+        return res.json(filteredItems);
+      }
+    }
+
+    res.json(items);
+
+  } catch (error) {
+    console.error('Error listing all files:', error);
+    res.status(500).json({ error: 'Failed to list files' });
+  }
+});
+
 // List files in bucket
 app.get('/api/buckets/:bucketName/files', async (req, res) => {
   const { bucketName } = req.params;
@@ -1319,6 +1406,99 @@ app.post('/api/rename', async (req, res) => {
   } catch (error) {
     console.error('Rename error:', error);
     res.status(500).json({ error: 'Failed to rename' });
+  }
+});
+
+// Global search files across all folders
+app.get('/api/buckets/:bucketName/search', async (req, res) => {
+  const { bucketName } = req.params;
+  const { query, userEmail } = req.query;
+
+  if (!query || query.trim().length < 2) {
+    return res.json([]);
+  }
+
+  try {
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!bucket) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+
+    // Get all objects in bucket
+    const command = new ListObjectsV2Command({ 
+      Bucket: bucketName,
+      MaxKeys: 1000
+    });
+    const response = await s3Client.send(command);
+
+    let allFiles = [];
+    if (response.Contents) {
+      allFiles = response.Contents
+        .filter(obj => !obj.Key.endsWith('/')) // Exclude folder markers
+        .map(obj => {
+          const fileName = obj.Key.split('/').pop();
+          const folderPath = obj.Key.includes('/') ? obj.Key.substring(0, obj.Key.lastIndexOf('/')) : '';
+          return {
+            id: obj.Key,
+            name: fileName,
+            type: 'file',
+            size: `${(obj.Size / 1024 / 1024).toFixed(2)} MB`,
+            modified: obj.LastModified.toISOString().split('T')[0],
+            fileType: fileName.split('.').pop(),
+            folderPath: folderPath
+          };
+        });
+    }
+
+    // Apply permission-based filtering
+    if (userEmail && bucket.owner_email !== userEmail) {
+      const member = await new Promise((resolve) => {
+        db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
+          resolve(row);
+        });
+      });
+
+      if (member && (member.scope_type === 'specific' || member.scope_type === 'nested')) {
+        const allowedFolders = JSON.parse(member.scope_folders || '[]');
+        allFiles = allFiles.filter(file => {
+          if (!file.folderPath) return false; // Root files not allowed for scoped users
+          
+          if (member.scope_type === 'specific') {
+            return allowedFolders.some(folder => file.folderPath.startsWith(folder));
+          } else if (member.scope_type === 'nested') {
+            return allowedFolders.some(folder => 
+              file.folderPath.startsWith(folder) || folder.startsWith(file.folderPath)
+            );
+          }
+          return false;
+        });
+      }
+    }
+
+    // Filter by search query
+    const searchResults = allFiles.filter(file => 
+      file.name.toLowerCase().includes(query.toLowerCase())
+    );
+
+    res.json(searchResults);
+
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({ error: 'Search failed' });
   }
 });
 
