@@ -60,6 +60,7 @@ db.serialize(() => {
     scope_type TEXT,
     scope_folders TEXT,
     expires_at DATETIME,
+    created_by TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     accepted BOOLEAN DEFAULT 0
   )`);
@@ -72,8 +73,31 @@ db.serialize(() => {
     permissions TEXT,
     scope_type TEXT,
     scope_folders TEXT,
+    invited_by TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  
+  db.run(`CREATE TABLE IF NOT EXISTS file_ownership (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bucket_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    owner_email TEXT NOT NULL,
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(bucket_name, file_path)
+  )`);
+  
+  // Add missing columns to existing tables
+  db.run(`ALTER TABLE members ADD COLUMN invited_by TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.log('Column invited_by already exists or other error:', err.message);
+    }
+  });
+  
+  db.run(`ALTER TABLE invitations ADD COLUMN created_by TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.log('Column created_by already exists or other error:', err.message);
+    }
+  });
 });
 
 // Email transporter setup
@@ -115,11 +139,16 @@ const checkFolderAccess = (userEmail, bucketName, items) => {
         // Check each item
         for (const item of items) {
           const itemKey = item.key || item;
-          const folderName = itemKey.split('/')[0];
           
           if (member.scope_type === 'specific') {
-            if (!allowedFolders.includes(folderName)) {
-              return reject(new Error(`You do not have permission to access the folder: ${folderName}`));
+            const isAllowed = allowedFolders.some(allowedFolder => {
+              return itemKey === allowedFolder || 
+                     itemKey.startsWith(allowedFolder + '/') || 
+                     allowedFolder.startsWith(itemKey + '/');
+            });
+            
+            if (!isAllowed) {
+              return reject(new Error(`You do not have permission to access: ${itemKey}. Allowed folders: ${allowedFolders.join(', ')}`));
             }
           } else if (member.scope_type === 'nested') {
             const isAllowed = allowedFolders.some(folder => 
@@ -135,6 +164,62 @@ const checkFolderAccess = (userEmail, bucketName, items) => {
       });
     });
   });
+};
+
+// Normalize old permissions to simplified structure
+const normalizePermissions = (oldPerms) => {
+  const normalized = {
+    view: 'none',
+    upload: 'none',
+    download: false,
+    share: false,
+    create_folder: false,
+    invite_members: false
+  };
+
+  // View permissions
+  if (oldPerms.viewOnly) normalized.view = 'all';
+  if (oldPerms.viewDownload) {
+    normalized.view = 'all';
+    normalized.download = true;
+  }
+  
+  // Upload permissions (manage = upload + rename + delete)
+  if (oldPerms.uploadViewOwn) {
+    normalized.upload = 'own';
+    normalized.view = 'own';
+  }
+  if (oldPerms.uploadViewAll) {
+    normalized.upload = 'all';
+    normalized.view = 'all';
+  }
+  
+  // Extra permissions
+  if (oldPerms.generateLinks) normalized.share = true;
+  if (oldPerms.createFolder) normalized.create_folder = true;
+  if (oldPerms.inviteMembers) normalized.invite_members = true;
+
+  return normalized;
+};
+
+// Check if invitee permissions are subset of inviter permissions
+const isSubset = (inviterPerms, inviteePerms) => {
+  const inviter = normalizePermissions(inviterPerms);
+  const invitee = normalizePermissions(inviteePerms);
+  
+  const scopeLevel = { 'none': 0, 'own': 1, 'all': 2 };
+  
+  // Check scope permissions
+  if (scopeLevel[invitee.view] > scopeLevel[inviter.view]) return false;
+  if (scopeLevel[invitee.upload] > scopeLevel[inviter.upload]) return false;
+  
+  // Check boolean permissions
+  if (invitee.download && !inviter.download) return false;
+  if (invitee.share && !inviter.share) return false;
+  if (invitee.create_folder && !inviter.create_folder) return false;
+  if (invitee.invite_members && !inviter.invite_members) return false;
+  
+  return true;
 };
 
 // Permission checking middleware
@@ -348,6 +433,7 @@ app.post('/api/upload-url', async (req, res) => {
             try {
               await checkFolderAccess(userEmail, bucketName, [{ key: folderPath }]);
             } catch (error) {
+              console.log('Upload folder access denied:', error.message);
               return res.status(403).json({ error: error.message });
             }
           }
@@ -368,7 +454,18 @@ app.post('/api/upload-url', async (req, res) => {
           },
         });
 
-        const s3Key = folderPath ? `${folderPath}/${fileName}` : fileName;
+        // Ensure proper folder path construction
+        let s3Key;
+        if (folderPath && folderPath.trim()) {
+          // Remove any trailing slashes and ensure proper path
+          const cleanFolderPath = folderPath.replace(/\/+$/, '');
+          s3Key = `${cleanFolderPath}/${fileName}`;
+        } else {
+          s3Key = fileName;
+        }
+        
+        console.log('Upload S3 Key:', s3Key);
+        console.log('Folder Path:', folderPath);
 
         const command = new PutObjectCommand({
           Bucket: bucketName,
@@ -456,12 +553,52 @@ app.get('/api/buckets/:bucketName/files/all', async (req, res) => {
     const response = await s3Client.send(command);
 
     const items = [];
+    const folderSet = new Set();
 
     if (response.Contents) {
       response.Contents.forEach(obj => {
-        if (!obj.Key.endsWith('/')) { // Only files, not folder markers
+        if (obj.Key.endsWith('/')) {
+          // Folder marker
+          const folderName = obj.Key.slice(0, -1).split('/').pop();
+          const parentPath = obj.Key.includes('/') ? obj.Key.substring(0, obj.Key.lastIndexOf('/', obj.Key.length - 2)) : '';
+          
+          if (folderName && !folderSet.has(obj.Key)) {
+            folderSet.add(obj.Key);
+            items.push({
+              id: obj.Key,
+              name: folderName,
+              type: 'folder',
+              modified: obj.LastModified.toISOString().split('T')[0],
+              folderPath: parentPath
+            });
+          }
+        } else {
+          // File
           const fileName = obj.Key.split('/').pop();
           const folderPath = obj.Key.includes('/') ? obj.Key.substring(0, obj.Key.lastIndexOf('/')) : '';
+          
+          // Also add parent folders if they don't exist as folder markers
+          if (folderPath) {
+            const pathParts = folderPath.split('/');
+            let currentPath = '';
+            
+            pathParts.forEach((part, index) => {
+              const parentPath = pathParts.slice(0, index).join('/');
+              currentPath = currentPath ? `${currentPath}/${part}` : part;
+              const folderKey = `${currentPath}/`;
+              
+              if (!folderSet.has(folderKey)) {
+                folderSet.add(folderKey);
+                items.push({
+                  id: folderKey,
+                  name: part,
+                  type: 'folder',
+                  modified: new Date().toISOString().split('T')[0],
+                  folderPath: parentPath
+                });
+              }
+            });
+          }
           
           items.push({
             id: obj.Key,
@@ -484,19 +621,15 @@ app.get('/api/buckets/:bucketName/files/all', async (req, res) => {
         });
       });
 
-      if (member && (member.scope_type === 'specific' || member.scope_type === 'nested')) {
+      if (member && member.scope_type === 'specific') {
         const allowedFolders = JSON.parse(member.scope_folders || '[]');
         const filteredItems = items.filter(item => {
           if (!item.folderPath) return false; // Root files not allowed for scoped users
           
-          if (member.scope_type === 'specific') {
-            return allowedFolders.some(folder => item.folderPath === folder || item.folderPath.startsWith(folder + '/'));
-          } else if (member.scope_type === 'nested') {
-            return allowedFolders.some(folder => 
-              item.folderPath.startsWith(folder) || folder.startsWith(item.folderPath)
-            );
-          }
-          return false;
+          // Check if item is within any allowed folder prefix
+          return allowedFolders.some(folder => 
+            item.folderPath === folder || item.folderPath.startsWith(folder + '/')
+          );
         });
         return res.json(filteredItems);
       }
@@ -616,20 +749,61 @@ app.get('/api/buckets/:bucketName/files', async (req, res) => {
     if (member.scope_type === 'specific') {
       const allowedFolders = JSON.parse(member.scope_folders || '[]');
       
+      console.log('=== FOLDER ACCESS DEBUG ===');
+      console.log('User:', userEmail);
+      console.log('Prefix:', prefix);
+      console.log('Allowed folders:', allowedFolders);
+      console.log('Available items:', items.map(i => ({name: i.name, type: i.type})));
+      
       if (!prefix) {
-        // Root directory - only show allowed folders
-        const filteredItems = items.filter(item => 
-          item.type === 'folder' && allowedFolders.includes(item.name)
-        );
-        return res.json(filteredItems);
+        // Root directory - show the deepest allowed folders directly with virtual mapping
+        const virtualFolders = allowedFolders.map(path => {
+          const parts = path.split('/');
+          const folderName = parts[parts.length - 1]; // Last part (deepest folder)
+          
+          return {
+            id: path + '/', // Use full S3 path as ID
+            name: folderName,
+            type: 'folder',
+            modified: new Date().toISOString().split('T')[0],
+            virtualPath: path // Store the real path for upload mapping
+          };
+        });
+        
+        console.log('Virtual folders to show at root:', virtualFolders);
+        return res.json(virtualFolders);
       } else {
-        // Inside folder - check if allowed
-        const currentFolder = prefix.split('/')[0];
-        if (!allowedFolders.includes(currentFolder)) {
+        // Inside folder - show only items that are in the allowed path
+        const currentPath = prefix.replace(/\/$/, '');
+        
+        // Check if current path leads to any allowed folder
+        const relevantAllowedPaths = allowedFolders.filter(allowedPath => 
+          allowedPath.startsWith(currentPath + '/') || allowedPath === currentPath
+        );
+        
+        if (relevantAllowedPaths.length === 0) {
           return res.status(403).json({ error: 'You do not have permission to view this folder.' });
         }
-        // If allowed, show all items in this folder
-        return res.json(items);
+        
+        // Filter items to show only those in the allowed path
+        const filteredItems = items.filter(item => {
+          if (item.type === 'file') {
+            // For files, check if we're in an allowed folder and user has view permissions
+            return relevantAllowedPaths.some(allowedPath => currentPath === allowedPath);
+          } else {
+            // For folders, check if this folder is part of any allowed path
+            const itemPath = currentPath ? `${currentPath}/${item.name}` : item.name;
+            return relevantAllowedPaths.some(allowedPath => 
+              allowedPath.startsWith(itemPath + '/') || allowedPath === itemPath
+            );
+          }
+        });
+        
+        console.log('Current path:', currentPath);
+        console.log('Relevant allowed paths:', relevantAllowedPaths);
+        console.log('Filtered items:', filteredItems.map(i => ({name: i.name, type: i.type})));
+        
+        return res.json(filteredItems);
       }
     } else if (member.scope_type === 'nested') {
       const allowedFolders = JSON.parse(member.scope_folders || '[]');
@@ -850,6 +1024,11 @@ app.post('/api/share', checkPermission('share'), async (req, res) => {
 // Delete files/folders
 app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
   const { bucketName, items, userEmail } = req.body;
+  
+  console.log('=== DELETE REQUEST RECEIVED ===');
+  console.log('Bucket:', bucketName);
+  console.log('Items to delete:', items);
+  console.log('User email:', userEmail);
 
   try {
     db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], async (err, row) => {
@@ -867,31 +1046,57 @@ app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
 
       const objectsToDelete = [];
       
+      console.log('Processing items for deletion:', items);
+      
       for (const item of items) {
+        console.log('Processing item:', item);
+        
         if (item.endsWith('/') || item.includes('/')) {
+          console.log('Item is folder or has path, checking for contents...');
           const prefix = item.endsWith('/') ? item : item + '/';
           const listCommand = new ListObjectsV2Command({ Bucket: bucketName, Prefix: prefix });
           const listResponse = await s3Client.send(listCommand);
           
           if (listResponse.Contents) {
+            console.log('Found contents for folder:', listResponse.Contents.length);
             listResponse.Contents.forEach(obj => {
+              console.log('Adding to delete list:', obj.Key);
               objectsToDelete.push({ Key: obj.Key });
             });
           }
         } else {
+          console.log('Item is file, adding directly:', item);
           objectsToDelete.push({ Key: item });
         }
       }
+      
+      console.log('Final objects to delete:', objectsToDelete);
 
       if (objectsToDelete.length > 0) {
+        console.log('Objects to delete from S3:', objectsToDelete);
+        
         const deleteCommand = new DeleteObjectsCommand({
           Bucket: bucketName,
           Delete: { Objects: objectsToDelete }
         });
         
-        await s3Client.send(deleteCommand);
+        console.log('Sending delete command to S3...');
+        const deleteResult = await s3Client.send(deleteCommand);
+        console.log('S3 delete result:', deleteResult);
+        
+        // Clean up ownership records for deleted files
+        const deletedKeys = objectsToDelete.map(obj => obj.Key);
+        console.log('Cleaning up ownership records for:', deletedKeys);
+        
+        for (const key of deletedKeys) {
+          db.run('DELETE FROM file_ownership WHERE bucket_name = ? AND file_path = ?', [bucketName, key], (err) => {
+            if (err) console.error('Error cleaning up ownership record:', err);
+            else console.log('Cleaned up ownership record for:', key);
+          });
+        }
       }
       
+      console.log('Delete operation completed successfully');
       res.json({ success: true, deleted: objectsToDelete.length });
     });
 
@@ -982,6 +1187,17 @@ app.get('/api/organizations/:bucketName', async (req, res) => {
 app.post('/api/invite', checkPermission('invite'), async (req, res) => {
   const { bucketName, email, permissions, scopeType, scopeFolders, userEmail } = req.body;
   
+  console.log('=== INVITATION DEBUG ===');
+  console.log('Request body:', { bucketName, email, permissions, scopeType, scopeFolders, userEmail });
+  console.log('Member permissions:', req.memberPermissions);
+  console.log('Environment variables:', {
+    SMTP_HOST: process.env.SMTP_HOST,
+    SMTP_PORT: process.env.SMTP_PORT,
+    SMTP_USER: process.env.SMTP_USER ? 'SET' : 'NOT SET',
+    SMTP_PASS: process.env.SMTP_PASS ? 'SET' : 'NOT SET',
+    FRONTEND_URL: process.env.FRONTEND_URL
+  });
+  
   try {
     // Check if member is trying to grant permissions they don't have
     if (req.memberPermissions) {
@@ -989,66 +1205,125 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
       const memberScopeType = req.memberPermissions.scopeType;
       const memberScopeFolders = req.memberPermissions.scopeFolders;
       
-      // Check each permission being granted
-      for (const [perm, value] of Object.entries(permissions)) {
-        if (value && !memberPerms[perm]) {
-          return res.status(403).json({ error: `You can't grant permissions higher than your own. You don't have '${perm}' permission.` });
-        }
+      console.log('Validating permissions...');
+      console.log('Member perms:', memberPerms);
+      console.log('Requested perms:', permissions);
+      
+      // Use isSubset to validate permission escalation
+      if (!isSubset(memberPerms, permissions)) {
+        console.log('Permission escalation detected');
+        return res.status(403).json({ error: 'You can\'t grant permissions higher than your own.' });
       }
+      
+      console.log('Permission validation passed');
       
       // Check scope restrictions
       if (scopeType === 'specific' && memberScopeType === 'specific') {
         const requestedFolders = scopeFolders || [];
-        const invalidFolders = requestedFolders.filter(folder => !memberScopeFolders.includes(folder));
+        const memberAllowedFolders = Array.isArray(memberScopeFolders) ? memberScopeFolders : JSON.parse(memberScopeFolders || '[]');
+        
+        console.log('Checking scope restrictions...');
+        console.log('Member allowed folders:', memberAllowedFolders);
+        console.log('Requested folders:', requestedFolders);
+        
+        // Check if requested folders are within member's scope
+        const invalidFolders = requestedFolders.filter(folder => {
+          return !memberAllowedFolders.some(allowedFolder => {
+            // Allow exact match or subfolder access
+            return folder === allowedFolder || 
+                   folder.startsWith(allowedFolder + '/') || 
+                   allowedFolder.startsWith(folder + '/');
+          });
+        });
+        
         if (invalidFolders.length > 0) {
-          return res.status(403).json({ error: `You can't grant access to folders you don't have access to: ${invalidFolders.join(', ')}` });
+          console.log('Invalid folders detected:', invalidFolders);
+          return res.status(403).json({ error: `You can't grant access to folders outside your scope: ${invalidFolders.join(', ')}` });
         }
-      } else if (scopeType === 'entire' && memberScopeType !== 'entire') {
+      } else if (scopeType === 'entire' && memberScopeType === 'specific') {
+        console.log('Entire bucket access denied for limited member');
         return res.status(403).json({ error: 'You can\'t grant entire bucket access when you have limited access.' });
       }
+      
+      console.log('Scope validation passed');
     }
     
+    console.log('Looking for organization...');
     db.get('SELECT * FROM organizations WHERE bucket_name = ?', [bucketName], async (err, org) => {
-      if (err || !org) {
+      if (err) {
+        console.error('Database error finding organization:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      if (!org) {
+        console.log('No organization found for bucket:', bucketName);
         return res.status(404).json({ error: 'Organization not found for this bucket' });
       }
+      
+      console.log('Organization found:', org.name);
       
       const inviteToken = uuidv4();
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       
+      console.log('Creating invitation in database...');
       db.run(
-        'INSERT INTO invitations (id, bucket_name, email, permissions, scope_type, scope_folders, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [inviteToken, bucketName, email, JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders || []), expiresAt],
+        'INSERT INTO invitations (id, bucket_name, email, permissions, scope_type, scope_folders, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [inviteToken, bucketName, email, JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders || []), expiresAt, userEmail],
         async function(err) {
           if (err) {
-            return res.status(500).json({ error: 'Failed to create invitation' });
+            console.error('Database error creating invitation:', err);
+            return res.status(500).json({ error: 'Failed to create invitation: ' + err.message });
           }
+          
+          console.log('Invitation created successfully');
           
           const inviteLink = `${process.env.FRONTEND_URL}/accept-invite/${inviteToken}`;
           
+          // Always succeed invitation creation, email is optional
+          let emailSent = false;
           try {
-            await transporter.sendMail({
-              from: '"ShipFile" <noreply@example.com>',
-              to: email,
-              subject: "You've been invited to join ShipFile",
-              html: `
-                <h2>You've been invited to join ShipFile</h2>
-                <p>You have been invited to join the organization <strong>${org.name}</strong> with <strong>${permissions}</strong> permissions.</p>
-                <p>Click the link below to accept the invitation:</p>
-                <a href="${inviteLink}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Accept Invitation</a>
-                <p>This invitation will expire in 7 days.</p>
-                <p>If you didn't expect this invitation, you can safely ignore this email.</p>
-              `
-            });
+            console.log('Attempting to send email...');
+            console.log('Transporter configured:', !!transporter);
+            console.log('SMTP_HOST:', process.env.SMTP_HOST);
             
-            res.json({ 
-              message: 'Invitation sent successfully',
-              email: email
-            });
+            if (transporter && process.env.SMTP_HOST) {
+              console.log('Sending email via transporter...');
+              const mailOptions = {
+                from: '"ShipFile" <noreply@example.com>',
+                to: email,
+                subject: "You've been invited to join ShipFile",
+                html: `
+                  <h2>You've been invited to join ShipFile</h2>
+                  <p>You have been invited to join the organization <strong>${org.name}</strong>.</p>
+                  <p>Click the link below to accept the invitation:</p>
+                  <a href="${inviteLink}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Accept Invitation</a>
+                  <p>This invitation will expire in 7 days.</p>
+                `
+              };
+              console.log('Mail options:', mailOptions);
+              
+              const result = await transporter.sendMail(mailOptions);
+              console.log('Email send result:', result);
+              emailSent = true;
+              console.log('Email sent successfully to:', email);
+            } else {
+              console.log('Email not configured, providing invite link instead');
+              console.log('Transporter exists:', !!transporter);
+              console.log('SMTP_HOST exists:', !!process.env.SMTP_HOST);
+            }
           } catch (emailError) {
-            console.error('Failed to send email:', emailError);
-            res.status(500).json({ error: 'Failed to send invitation email' });
+            console.error('Email send failed - Full error:', emailError);
+            console.error('Error message:', emailError.message);
+            console.error('Error stack:', emailError.stack);
+            emailSent = false;
           }
+          
+          // Always return success with invite link as fallback
+          res.json({ 
+            message: 'Invitation created successfully',
+            email: email,
+            inviteLink: inviteLink,
+            emailSent: emailSent
+          });
         }
       );
     });
@@ -1101,29 +1376,34 @@ app.post('/api/invite/:token/accept', async (req, res) => {
         return res.status(410).json({ error: 'Invitation has expired' });
       }
       
-      db.run(
-        'INSERT OR REPLACE INTO members (email, password, bucket_name, permissions, scope_type, scope_folders) VALUES (?, ?, ?, ?, ?, ?)',
-        [invite.email, password, invite.bucket_name, invite.permissions, invite.scope_type, invite.scope_folders],
-        function(err) {
-          if (err) {
-            return res.status(500).json({ error: 'Failed to create member account' });
-          }
-          
-          db.run('UPDATE invitations SET accepted = 1 WHERE id = ?', [token], (err) => {
+      // Get who sent the invitation
+      db.get('SELECT created_by FROM invitations WHERE id = ?', [token], (err, inviteData) => {
+        const invitedBy = inviteData?.created_by || 'owner';
+        
+        db.run(
+          'INSERT OR REPLACE INTO members (email, password, bucket_name, permissions, scope_type, scope_folders, invited_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [invite.email, password, invite.bucket_name, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy],
+          function(err) {
             if (err) {
-              return res.status(500).json({ error: 'Failed to accept invitation' });
+              return res.status(500).json({ error: 'Failed to create member account' });
             }
             
-            res.json({ 
-              message: 'Account created successfully',
-              bucketName: invite.bucket_name,
-              email: invite.email,
-              scopeType: invite.scope_type,
-              scopeFolders: invite.scope_folders
+            db.run('UPDATE invitations SET accepted = 1 WHERE id = ?', [token], (err) => {
+              if (err) {
+                return res.status(500).json({ error: 'Failed to accept invitation' });
+              }
+              
+              res.json({ 
+                message: 'Account created successfully',
+                bucketName: invite.bucket_name,
+                email: invite.email,
+                scopeType: invite.scope_type,
+                scopeFolders: invite.scope_folders
+              });
             });
-          });
-        }
-      );
+          }
+        );
+      });
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to accept invitation' });
@@ -1502,6 +1782,194 @@ app.get('/api/buckets/:bucketName/search', async (req, res) => {
   }
 });
 
+// Get complete folder tree structure
+app.get('/api/buckets/:bucketName/folders/tree', async (req, res) => {
+  const { bucketName } = req.params;
+  const { ownerEmail, memberEmail } = req.query;
+
+  try {
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!bucket) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+
+    // Get all objects to build folder structure
+    const command = new ListObjectsV2Command({ 
+      Bucket: bucketName,
+      MaxKeys: 1000
+    });
+    const response = await s3Client.send(command);
+
+    const folderPaths = new Set();
+
+    if (response.Contents) {
+      response.Contents.forEach(obj => {
+        if (obj.Key.includes('/')) {
+          const pathParts = obj.Key.split('/');
+          // Add all parent folder paths
+          for (let i = 1; i < pathParts.length; i++) {
+            const folderPath = pathParts.slice(0, i).join('/');
+            if (folderPath) {
+              folderPaths.add(folderPath);
+            }
+          }
+        }
+      });
+    }
+
+    let filteredPaths = Array.from(folderPaths);
+
+    // If member is requesting, filter by their accessible scope
+    if (memberEmail && bucket.owner_email !== memberEmail) {
+      const member = await new Promise((resolve) => {
+        db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [memberEmail, bucketName], (err, row) => {
+          resolve(row);
+        });
+      });
+
+      if (member && member.scope_type === 'specific') {
+        const allowedFolders = JSON.parse(member.scope_folders || '[]');
+        
+        // Filter to only show folders within member's scope
+        filteredPaths = filteredPaths.filter(folderPath => {
+          return allowedFolders.some(allowedFolder => 
+            folderPath.startsWith(allowedFolder) || allowedFolder.startsWith(folderPath)
+          );
+        });
+      }
+    }
+
+    res.json(filteredPaths.sort());
+
+  } catch (error) {
+    console.error('Error listing folder tree:', error);
+    res.status(500).json({ error: 'Failed to list folders' });
+  }
+});
+
+// Get members for permission copying
+app.get('/api/buckets/:bucketName/members', async (req, res) => {
+  const { bucketName } = req.params;
+  const { userEmail, isOwner } = req.query;
+
+  try {
+    if (isOwner === 'true') {
+      // Owner can see all members
+      db.all('SELECT email, scope_type, scope_folders FROM members WHERE bucket_name = ?', [bucketName], (err, members) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Database error' });
+        }
+        res.json(members || []);
+      });
+    } else {
+      // Member can only see members they invited
+      db.all('SELECT email, scope_type, scope_folders FROM members WHERE bucket_name = ? AND invited_by = ?', [bucketName, userEmail], (err, members) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Database error' });
+        }
+        res.json(members || []);
+      });
+    }
+  } catch (error) {
+    console.error('Failed to load members:', error);
+    res.status(500).json({ error: 'Failed to load members' });
+  }
+});
+
+// Get member permissions for copying
+app.get('/api/members/:email/permissions', async (req, res) => {
+  const { email } = req.params;
+  const { bucketName } = req.query;
+
+  try {
+    db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
+      [email, bucketName], (err, member) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+      if (!member) {
+        return res.status(404).json({ error: 'Member not found' });
+      }
+      res.json(member);
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get member permissions' });
+  }
+});
+
+// Track file ownership
+app.post('/api/files/ownership', async (req, res) => {
+  const { bucketName, fileName, filePath, ownerEmail } = req.body;
+
+  console.log('=== TRACKING FILE OWNERSHIP ===');
+  console.log('Bucket:', bucketName);
+  console.log('File Name:', fileName);
+  console.log('File Path:', filePath);
+  console.log('Owner Email:', ownerEmail);
+
+  try {
+    db.run(
+      'INSERT OR REPLACE INTO file_ownership (bucket_name, file_path, owner_email, uploaded_at) VALUES (?, ?, ?, ?)',
+      [bucketName, filePath, ownerEmail, new Date().toISOString()],
+      function(err) {
+        if (err) {
+          console.error('Error tracking file ownership:', err);
+          return res.status(500).json({ error: 'Failed to track ownership' });
+        }
+        console.log('✅ File ownership tracked successfully');
+        res.json({ success: true });
+      }
+    );
+  } catch (error) {
+    console.error('File ownership tracking error:', error);
+    res.status(500).json({ error: 'Failed to track ownership' });
+  }
+});
+
+// Get files owned by user
+app.get('/api/files/ownership/:bucketName', async (req, res) => {
+  const { bucketName } = req.params;
+  const { userEmail } = req.query;
+
+  console.log('=== GETTING OWNED FILES ===');
+  console.log('Bucket:', bucketName);
+  console.log('User Email:', userEmail);
+
+  try {
+    db.all(
+      'SELECT file_path FROM file_ownership WHERE bucket_name = ? AND owner_email = ?',
+      [bucketName, userEmail],
+      (err, files) => {
+        if (err) {
+          console.error('Error getting owned files:', err);
+          return res.status(500).json({ error: 'Failed to get owned files' });
+        }
+        console.log('Owned files found:', files);
+        res.json(files || []);
+      }
+    );
+  } catch (error) {
+    console.error('Get owned files error:', error);
+    res.status(500).json({ error: 'Failed to get owned files' });
+  }
+});
+
 // Member Google login
 app.post('/api/member/google-login', async (req, res) => {
   const { email } = req.body;
@@ -1572,7 +2040,103 @@ app.post('/api/owner/change-password', async (req, res) => {
   }
 });
 
+// Test invitation endpoint for debugging
+app.post('/api/test-invite', async (req, res) => {
+  console.log('=== TEST INVITATION ENDPOINT ===');
+  console.log('Request body:', req.body);
+  
+  const testData = {
+    bucketName: 'shipfile01',
+    email: 'pk@gmail.com',
+    permissions: {
+      viewOnly: true,
+      viewDownload: false,
+      uploadOnly: false,
+      uploadViewOwn: true,
+      uploadViewAll: false,
+      deleteFiles: false,
+      generateLinks: true,
+      createFolder: false,
+      deleteOwnFiles: true,
+      inviteMembers: true
+    },
+    scopeType: 'specific',
+    scopeFolders: ['limux/checking_permissions'],
+    userEmail: 'rr@gmail.com'
+  };
+  
+  try {
+    // Simulate the invitation process
+    const response = await fetch('http://localhost:3001/api/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(testData)
+    });
+    
+    const result = await response.json();
+    
+    res.json({
+      success: response.ok,
+      status: response.status,
+      data: result,
+      testData: testData
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message,
+      testData: testData
+    });
+  }
+});
+
+// Test email configuration
+app.post('/api/test-email', async (req, res) => {
+  const { testEmail } = req.body;
+  
+  try {
+    console.log('Testing email configuration...');
+    console.log('SMTP Config:', {
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      user: process.env.SMTP_USER ? 'SET' : 'NOT SET',
+      pass: process.env.SMTP_PASS ? 'SET' : 'NOT SET'
+    });
+    
+    if (!transporter) {
+      return res.status(500).json({ error: 'Email transporter not configured' });
+    }
+    
+    const result = await transporter.sendMail({
+      from: '"ShipFile Test" <noreply@example.com>',
+      to: testEmail || 'test@example.com',
+      subject: 'ShipFile Email Test',
+      html: '<h2>Email configuration test successful!</h2><p>Your SMTP settings are working correctly.</p>'
+    });
+    
+    console.log('Test email result:', result);
+    res.json({ 
+      success: true, 
+      message: 'Test email sent successfully',
+      messageId: result.messageId
+    });
+    
+  } catch (error) {
+    console.error('Test email failed:', error);
+    res.status(500).json({ 
+      error: 'Test email failed: ' + error.message,
+      details: error.stack
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log('Environment check:');
+  console.log('- SMTP_HOST:', process.env.SMTP_HOST);
+  console.log('- SMTP_PORT:', process.env.SMTP_PORT);
+  console.log('- SMTP_USER:', process.env.SMTP_USER ? 'SET' : 'NOT SET');
+  console.log('- SMTP_PASS:', process.env.SMTP_PASS ? 'SET' : 'NOT SET');
+  console.log('- FRONTEND_URL:', process.env.FRONTEND_URL);
+  console.log('- Transporter configured:', !!transporter);
 });

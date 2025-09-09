@@ -51,6 +51,60 @@ const getFileIcon = (type: string, fileType?: string) => {
   }
 };
 
+const FolderTreeNode = ({ tree, level, expandedFolders, selectedFolderPaths, onToggleExpansion, onFolderSelect, isChildOfSelected }) => {
+  return (
+    <div>
+      {Object.entries(tree).map(([folderName, folderData]) => {
+        const hasChildren = Object.keys(folderData.children).length > 0;
+        const isExpanded = expandedFolders.has(folderData.fullPath);
+        const isSelected = selectedFolderPaths.has(folderData.fullPath);
+        const isChildSelected = isChildOfSelected(folderData.fullPath, selectedFolderPaths);
+        
+        return (
+          <div key={folderData.fullPath}>
+            <div 
+              className="flex items-center space-x-2 py-1 hover:bg-gray-50 rounded"
+              style={{ paddingLeft: `${level * 20 + 8}px` }}
+            >
+              {hasChildren && (
+                <button
+                  onClick={() => onToggleExpansion(folderData.fullPath)}
+                  className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-gray-700"
+                >
+                  {isExpanded ? '▼' : '▶'}
+                </button>
+              )}
+              {!hasChildren && <div className="w-4" />}
+              
+              <input
+                type="checkbox"
+                checked={isSelected || isChildSelected}
+                onChange={(e) => onFolderSelect(folderData.fullPath, e.target.checked)}
+                className="w-4 h-4"
+              />
+              
+              <Folder className="h-4 w-4 text-blue-500" />
+              <span className="text-sm">{folderName}</span>
+            </div>
+            
+            {hasChildren && isExpanded && (
+              <FolderTreeNode
+                tree={folderData.children}
+                level={level + 1}
+                expandedFolders={expandedFolders}
+                selectedFolderPaths={selectedFolderPaths}
+                onToggleExpansion={onToggleExpansion}
+                onFolderSelect={onFolderSelect}
+                isChildOfSelected={isChildOfSelected}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 export default function FileManager() {
   const { signOut } = useClerk();
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -74,20 +128,22 @@ export default function FileManager() {
   const [orgName, setOrgName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePermissions, setInvitePermissions] = useState({
-    viewOnly: false,
-    viewDownload: false,
-    uploadOnly: false,
-    uploadViewOwn: false,
-    uploadViewAll: false,
-    deleteFiles: false,
-    generateLinks: false,
-    createFolder: false,
-    deleteOwnFiles: false,
-    inviteMembers: false
+    view: 'none',
+    upload: 'none',
+    download: false,
+    share: false,
+    create_folder: false,
+    invite_members: false
   });
   const [scopeType, setScopeType] = useState('entire');
   const [availableFolders, setAvailableFolders] = useState([]);
   const [selectedFolders, setSelectedFolders] = useState([]);
+  const [folderTree, setFolderTree] = useState({});
+  const [expandedFolders, setExpandedFolders] = useState(new Set());
+  const [selectedFolderPaths, setSelectedFolderPaths] = useState(new Set());
+  const [showCopyPermissions, setShowCopyPermissions] = useState(false);
+  const [availableMembers, setAvailableMembers] = useState([]);
+  const [selectedMemberToCopy, setSelectedMemberToCopy] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [userPermissions, setUserPermissions] = useState(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -201,6 +257,9 @@ export default function FileManager() {
     
     for (const file of Array.from(fileList)) {
       try {
+        console.log('Upload request - Current Path:', currentPath);
+        console.log('Upload request - File Name:', file.name);
+        
         const response = await fetch('http://localhost:3001/api/upload-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -208,7 +267,7 @@ export default function FileManager() {
             bucketName: currentBucket,
             fileName: file.name,
             fileType: file.type,
-            folderPath: currentPath,
+            folderPath: currentPath || '',
             userEmail: currentUser?.email
           })
         });
@@ -227,6 +286,22 @@ export default function FileManager() {
         if (!uploadResponse.ok) {
           throw new Error('Failed to upload file');
         }
+
+        // Track file ownership with the same S3 key used for upload
+        const s3Key = currentPath ? `${currentPath}/${file.name}` : file.name;
+        console.log('Tracking ownership for S3 key:', s3Key);
+        console.log('Current path during ownership tracking:', currentPath);
+        
+        await fetch('http://localhost:3001/api/files/ownership', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bucketName: currentBucket,
+            fileName: file.name,
+            filePath: s3Key,
+            ownerEmail: currentUser?.email
+          })
+        });
 
         console.log(`Uploaded ${file.name} successfully`);
       } catch (error) {
@@ -303,8 +378,34 @@ export default function FileManager() {
       console.log('Final userEmail being sent:', userEmail);
       console.log('Loading files from:', url);
       const response = await fetch(url);
-      const data = await response.json();
-      console.log('Files loaded:', data);
+      let data = await response.json();
+      console.log('=== FILES LOADED ===');
+      console.log('URL:', url);
+      console.log('Raw data:', data);
+      console.log('Files count:', data.length);
+      
+      // Filter files based on view permissions
+      if (currentUser?.role !== 'owner' && userPermissions?.uploadViewOwn && !userPermissions?.uploadViewAll) {
+        // User can only view own files
+        const ownershipResponse = await fetch(`http://localhost:3001/api/files/ownership/${currentBucket}?userEmail=${encodeURIComponent(userEmail)}`);
+        const ownedFiles = await ownershipResponse.json();
+        const ownedFilePaths = new Set(ownedFiles.map(f => f.file_path));
+        
+        console.log('Owned file paths:', Array.from(ownedFilePaths));
+        console.log('Current path:', currentPath);
+        
+        data = data.filter(file => {
+          if (file.type === 'folder') return true;
+          
+          // Construct the full file path as stored in ownership table
+          const filePath = file.id; // file.id already contains the full S3 key
+          const isOwned = ownedFilePaths.has(filePath);
+          
+          console.log(`Checking file: ${file.name}, path: ${filePath}, owned: ${isOwned}`);
+          return isOwned;
+        });
+      }
+      
       setFiles(data);
     } catch (error) {
       console.error('Failed to load files:', error);
@@ -349,71 +450,107 @@ export default function FileManager() {
     }
   };
   
+  const buildFolderTree = (folderPaths) => {
+    const tree = {};
+    
+    folderPaths.forEach(path => {
+      const parts = path.split('/');
+      let current = tree;
+      
+      parts.forEach((part, index) => {
+        if (!current[part]) {
+          current[part] = {
+            children: {},
+            fullPath: parts.slice(0, index + 1).join('/'),
+            isFolder: true
+          };
+        }
+        current = current[part].children;
+      });
+    });
+    
+    return tree;
+  };
+
   const loadFolders = async () => {
     try {
       const ownerData = localStorage.getItem('currentOwner');
       const memberData = localStorage.getItem('currentMember');
       
-      console.log('=== LOAD FOLDERS DEBUG ===');
-      console.log('ownerData:', ownerData);
-      console.log('memberData:', memberData);
-      
       if (ownerData) {
-        // Owner can see all folders
+        // Owner can see all folders - get complete folder structure
         const owner = JSON.parse(ownerData);
-        const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/folders?ownerEmail=${encodeURIComponent(owner.email)}`);
+        const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/folders/tree?ownerEmail=${encodeURIComponent(owner.email)}`);
         const folders = await response.json();
-        setAvailableFolders(folders);
+        const tree = buildFolderTree(folders);
+        setFolderTree(tree);
       } else if (memberData) {
-        // Member can only see their accessible folders
-        try {
-          const member = JSON.parse(memberData);
-          console.log('Member data:', member);
-          console.log('Member scopeType:', member.scopeType);
-          console.log('Member scopeFolders raw:', member.scopeFolders);
-          
-          if (member.scopeType === 'specific' || member.scopeType === 'nested') {
-            let accessibleFolders = [];
-            
-            // Handle different data formats
-            if (typeof member.scopeFolders === 'string') {
-              try {
-                accessibleFolders = JSON.parse(member.scopeFolders);
-              } catch (e) {
-                console.error('Failed to parse scopeFolders:', e);
-              }
-            } else if (Array.isArray(member.scopeFolders)) {
-              accessibleFolders = member.scopeFolders;
-            }
-            
-            console.log('Final accessible folders:', accessibleFolders);
-            setAvailableFolders(accessibleFolders || []);
-          } else {
-            setAvailableFolders([]);
-          }
-        } catch (error) {
-          console.error('Error parsing member data:', error);
-          setAvailableFolders([]);
-        }
+        // Member can see all subfolders within their accessible scope
+        const member = JSON.parse(memberData);
+        const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/folders/tree?memberEmail=${encodeURIComponent(member.email)}`);
+        const folders = await response.json();
+        const tree = buildFolderTree(folders);
+        setFolderTree(tree);
       } else {
-        setAvailableFolders([]);
+        setFolderTree({});
       }
     } catch (error) {
       console.error('Failed to load folders:', error);
     }
   };
 
+  // Convert simplified permissions to old format for backend
+  const convertToOldFormat = (simplified) => {
+    const old = {
+      viewOnly: false,
+      viewDownload: false,
+      uploadOnly: false,
+      uploadViewOwn: false,
+      uploadViewAll: false,
+      deleteFiles: false,
+      generateLinks: false,
+      createFolder: false,
+      deleteOwnFiles: false,
+      inviteMembers: false
+    };
+
+    // View permissions
+    if (simplified.view === 'all' && !simplified.download) old.viewOnly = true;
+    if (simplified.view === 'all' && simplified.download) old.viewDownload = true;
+    if (simplified.view === 'own' && simplified.download) old.viewDownload = true;
+    if (simplified.view === 'own' && !simplified.download) old.viewOnly = true;
+    
+    // Upload permissions (includes manage = rename + delete)
+    if (simplified.upload === 'own') {
+      old.uploadViewOwn = true;
+      old.deleteOwnFiles = true; // Manage own includes delete own
+    }
+    if (simplified.upload === 'all') {
+      old.uploadViewAll = true;
+      old.deleteFiles = true; // Manage all includes delete all
+    }
+    
+    // Extra permissions
+    if (simplified.share) old.generateLinks = true;
+    if (simplified.create_folder) old.createFolder = true;
+    if (simplified.invite_members) old.inviteMembers = true;
+
+    return old;
+  };
+
   const handleSendInvite = async () => {
     if (!inviteEmail.trim()) return;
     
     try {
+      const oldFormatPermissions = convertToOldFormat(invitePermissions);
+      
       const response = await fetch('http://localhost:3001/api/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           bucketName: currentBucket,
           email: inviteEmail.trim(),
-          permissions: invitePermissions,
+          permissions: oldFormatPermissions,
           scopeType: scopeType,
           scopeFolders: selectedFolders,
           userEmail: currentUser?.email
@@ -429,20 +566,26 @@ export default function FileManager() {
       setShowInvite(false);
       setInviteEmail('');
       setInvitePermissions({
-        viewOnly: false,
-        viewDownload: false,
-        uploadOnly: false,
-        uploadViewOwn: false,
-        uploadViewAll: false,
-        deleteFiles: false,
-        generateLinks: false,
-        createFolder: false,
-        deleteOwnFiles: false,
-        inviteMembers: false
+        view: 'none',
+        upload: 'none',
+        download: false,
+        share: false,
+        create_folder: false,
+        invite_members: false
       });
       setScopeType('entire');
       setSelectedFolders([]);
-      alert(`Invitation email sent successfully to ${inviteEmail}!`);
+      setExpandedFolders(new Set());
+      setSelectedFolderPaths(new Set());
+      setShowCopyPermissions(false);
+      setAvailableMembers([]);
+      setSelectedMemberToCopy('');
+      
+      if (data.emailSent) {
+        alert(`Invitation email sent successfully to ${inviteEmail}!`);
+      } else {
+        alert(`Invitation created! Share this link with ${inviteEmail}:\n\n${data.inviteLink}`);
+      }
     } catch (error) {
       console.error('Failed to send invitation:', error);
       alert(error.message || 'Failed to send invitation');
@@ -451,9 +594,16 @@ export default function FileManager() {
   
 
 
-  const handleFolderClick = (folderName: string) => {
-    const newPath = currentPath ? `${currentPath}/${folderName}` : folderName;
-    setCurrentPath(newPath);
+  const handleFolderClick = (folderName: string, folderId?: string) => {
+    // If folderId contains full path (virtual folder), use it directly
+    if (folderId && folderId.includes('/')) {
+      const virtualPath = folderId.replace(/\/$/, ''); // Remove trailing slash
+      console.log('Setting virtual path:', virtualPath);
+      setCurrentPath(virtualPath);
+    } else {
+      const newPath = currentPath ? `${currentPath}/${folderName}` : folderName;
+      setCurrentPath(newPath);
+    }
   };
 
   const handleBackClick = () => {
@@ -508,6 +658,7 @@ export default function FileManager() {
   };
 
   const handleDelete = async () => {
+    console.log('Bulk deleting files:', selectedFiles);
     if (selectedFiles.length === 0) return;
     
     if (!confirm(`Delete ${selectedFiles.length} item(s)?`)) return;
@@ -526,7 +677,7 @@ export default function FileManager() {
       if (!response.ok) throw new Error('Delete failed');
       
       setSelectedFiles([]);
-      loadFiles();
+      await loadFiles();
       
     } catch (error) {
       console.error('Delete failed:', error);
@@ -581,7 +732,7 @@ export default function FileManager() {
     alert('Link copied to clipboard!');
   };
 
-  const hasPermission = (action) => {
+  const hasPermission = (action, file = null) => {
     if (currentUser?.role === 'owner') return true;
     if (!userPermissions) return false;
     
@@ -591,7 +742,7 @@ export default function FileManager() {
       case 'download':
         return userPermissions.viewDownload || userPermissions.uploadViewAll;
       case 'delete':
-        return userPermissions.deleteFiles;
+        return userPermissions.deleteFiles || userPermissions.deleteOwnFiles || userPermissions.uploadViewAll || userPermissions.uploadViewOwn;
       case 'share':
         return userPermissions.generateLinks;
       case 'createFolder':
@@ -599,7 +750,22 @@ export default function FileManager() {
       case 'invite':
         return userPermissions.inviteMembers;
       case 'rename':
-        return userPermissions.uploadOnly || userPermissions.uploadViewOwn || userPermissions.uploadViewAll || userPermissions.deleteFiles;
+        if (userPermissions.uploadViewAll || userPermissions.deleteFiles) {
+          return true; // Can rename all files
+        }
+        if (userPermissions.uploadViewOwn || userPermissions.deleteOwnFiles) {
+          return true; // Can rename own files (already filtered)
+        }
+        return false;
+      case 'preview':
+        // Check if user can view this specific file
+        if (userPermissions.uploadViewAll || userPermissions.viewDownload || userPermissions.viewOnly) {
+          return true; // Can view all files
+        }
+        if (userPermissions.uploadViewOwn) {
+          return true; // File ownership already filtered in loadFiles
+        }
+        return false;
       default:
         return false;
     }
@@ -610,6 +776,20 @@ export default function FileManager() {
       alert('You do not have permission to perform UPLOAD on this bucket. Please contact the owner for access.');
       return;
     }
+    
+    // Check if user is at virtual root (has specific folder permissions but not in a folder)
+    const memberData = localStorage.getItem('currentMember');
+    if (memberData && !currentPath) {
+      const member = JSON.parse(memberData);
+      console.log('Member data for upload check:', member);
+      
+      // Check if member has specific folder scope (not entire bucket access)
+      if (member.scopeType === 'specific' || (member.scopeFolders && member.scopeFolders.length > 0)) {
+        alert('Please enter a folder first before uploading files.');
+        return;
+      }
+    }
+    
     setShowUpload(true);
   };
 
@@ -634,6 +814,20 @@ export default function FileManager() {
       alert('You do not have permission to perform CREATE FOLDER on this bucket. Please contact the owner for access.');
       return;
     }
+    
+    // Check if user is at virtual root
+    const memberData = localStorage.getItem('currentMember');
+    if (memberData && !currentPath) {
+      const member = JSON.parse(memberData);
+      console.log('Member data for folder check:', member);
+      
+      // Check if member has specific folder scope (not entire bucket access)
+      if (member.scopeType === 'specific' || (member.scopeFolders && member.scopeFolders.length > 0)) {
+        alert('Please enter a folder first before creating new folders.');
+        return;
+      }
+    }
+    
     setShowNewFolder(true);
   };
 
@@ -753,6 +947,7 @@ export default function FileManager() {
   };
 
   const handleDeleteSingle = async (file) => {
+    console.log('Deleting file:', file.name, 'ID:', file.id);
     if (!hasPermission('delete')) {
       alert('You do not have permission to perform DELETE on this bucket. Please contact the owner for access.');
       return;
@@ -761,25 +956,44 @@ export default function FileManager() {
     if (!confirm(`Delete ${file.name}?`)) return;
 
     try {
+      console.log('Sending delete request for:', file.id);
+      console.log('Current user email:', currentUser?.email);
+      
+      const deletePayload = {
+        bucketName: currentBucket,
+        items: [file.id],
+        userEmail: currentUser?.email
+      };
+      
+      console.log('Delete payload:', deletePayload);
+      
       const response = await fetch('http://localhost:3001/api/delete', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bucketName: currentBucket,
-          items: [file.id],
-          userEmail: currentUser?.email
-        })
+        body: JSON.stringify(deletePayload)
       });
+      
+      console.log('Delete response status:', response.status);
+      console.log('Delete response ok:', response.ok);
       
       if (!response.ok) {
         const error = await response.json();
+        console.error('Delete failed:', error);
         throw new Error(error.error || 'Failed to delete');
       }
       
-      loadFiles(); // Refresh the file list
+      const result = await response.json();
+      console.log('Delete response:', result);
+      
+      console.log('Refreshing file list after delete...');
+      await loadFiles(); // Refresh the file list
+      console.log('File list refreshed');
+      
       alert(`${file.type === 'folder' ? 'Folder' : 'File'} deleted successfully!`);
     } catch (error) {
-      console.error('Delete failed:', error);
+      console.error('Delete failed - Full error:', error);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
       alert(error.message || 'Failed to delete');
     }
   };
@@ -869,9 +1083,211 @@ export default function FileManager() {
 
   React.useEffect(() => {
     if (showInvite && scopeType === 'specific') {
+      setExpandedFolders(new Set());
+      setSelectedFolderPaths(new Set());
       loadFolders();
     }
   }, [showInvite, scopeType]);
+
+  const toggleFolderExpansion = (folderPath) => {
+    const newExpanded = new Set(expandedFolders);
+    if (newExpanded.has(folderPath)) {
+      newExpanded.delete(folderPath);
+    } else {
+      newExpanded.add(folderPath);
+    }
+    setExpandedFolders(newExpanded);
+  };
+
+  const isChildOfSelected = (folderPath, selectedPaths) => {
+    return Array.from(selectedPaths).some(selectedPath => 
+      folderPath.startsWith(selectedPath + '/') || folderPath === selectedPath
+    );
+  };
+
+  const getChildPaths = (folderPath, tree) => {
+    const paths = [];
+    const traverse = (node, currentPath) => {
+      Object.keys(node).forEach(key => {
+        const childPath = currentPath ? `${currentPath}/${key}` : key;
+        paths.push(childPath);
+        if (node[key].children && Object.keys(node[key].children).length > 0) {
+          traverse(node[key].children, childPath);
+        }
+      });
+    };
+    
+    const parts = folderPath.split('/');
+    let current = tree;
+    for (const part of parts) {
+      if (current[part]) {
+        current = current[part].children;
+      } else {
+        return [];
+      }
+    }
+    traverse(current, folderPath);
+    return paths;
+  };
+
+  const handleFolderSelect = (folderPath, isSelected) => {
+    const newSelected = new Set(selectedFolderPaths);
+    
+    if (isSelected) {
+      // Add folder and remove any parent paths that would be redundant
+      newSelected.add(folderPath);
+      
+      // Remove any child paths as they're now covered by parent
+      const childPaths = getChildPaths(folderPath, folderTree);
+      childPaths.forEach(childPath => newSelected.delete(childPath));
+      
+      // Remove any parent paths that are now redundant
+      Array.from(newSelected).forEach(selectedPath => {
+        if (folderPath.startsWith(selectedPath + '/')) {
+          newSelected.delete(selectedPath);
+        }
+      });
+    } else {
+      // Remove folder and all its children
+      newSelected.delete(folderPath);
+      const childPaths = getChildPaths(folderPath, folderTree);
+      childPaths.forEach(childPath => newSelected.delete(childPath));
+    }
+    
+    setSelectedFolderPaths(newSelected);
+    setSelectedFolders(Array.from(newSelected));
+  };
+
+  const loadAvailableMembers = async () => {
+    try {
+      const currentUserEmail = currentUser?.email;
+      const isOwner = currentUser?.role === 'owner';
+      
+      const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/members?userEmail=${encodeURIComponent(currentUserEmail)}&isOwner=${isOwner}`);
+      const members = await response.json();
+      setAvailableMembers(members);
+    } catch (error) {
+      console.error('Failed to load members:', error);
+    }
+  };
+
+  const handleCopyPermissions = async (memberEmail) => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(memberEmail)}/permissions?bucketName=${currentBucket}`);
+      const memberData = await response.json();
+      
+      if (memberData.permissions) {
+        const permissions = JSON.parse(memberData.permissions);
+        
+        // Convert old format to simplified format
+        const simplified = {
+          view: 'none',
+          upload: 'none',
+          download: false,
+          share: false,
+          create_folder: false,
+          invite_members: false
+        };
+        
+        if (permissions.viewOnly || permissions.viewDownload) simplified.view = 'all';
+        if (permissions.uploadViewOwn) {
+          simplified.view = 'own';
+          simplified.upload = 'own';
+        }
+        if (permissions.uploadViewAll) {
+          simplified.view = 'all';
+          simplified.upload = 'all';
+        }
+        if (permissions.viewDownload) simplified.download = true;
+        if (permissions.generateLinks) simplified.share = true;
+        if (permissions.createFolder) simplified.create_folder = true;
+        if (permissions.inviteMembers) simplified.invite_members = true;
+        
+        setInvitePermissions(simplified);
+        
+        // Copy scope settings
+        if (memberData.scope_type) {
+          setScopeType(memberData.scope_type);
+          if (memberData.scope_folders) {
+            const scopeFolders = JSON.parse(memberData.scope_folders);
+            setSelectedFolders(scopeFolders);
+            setSelectedFolderPaths(new Set(scopeFolders));
+          }
+        }
+      }
+      
+      setShowCopyPermissions(false);
+      setSelectedMemberToCopy('');
+    } catch (error) {
+      console.error('Failed to copy permissions:', error);
+      alert('Failed to copy permissions');
+    }
+  };
+
+  const handleShowCopyPermissions = () => {
+    setShowCopyPermissions(true);
+    loadAvailableMembers();
+  };
+
+  const canGrantPermission = (permissionType, permissionValue) => {
+    if (currentUser?.role === 'owner') return true;
+    if (!userPermissions) return false;
+
+    switch (permissionType) {
+      case 'view':
+        if (permissionValue === 'all') {
+          return userPermissions.uploadViewAll || userPermissions.viewDownload;
+        }
+        if (permissionValue === 'own') {
+          return userPermissions.uploadViewOwn || userPermissions.uploadViewAll;
+        }
+        return true;
+      
+      case 'upload':
+        if (permissionValue === 'all') {
+          return userPermissions.uploadViewAll;
+        }
+        if (permissionValue === 'own') {
+          return userPermissions.uploadViewOwn || userPermissions.uploadViewAll;
+        }
+        return true;
+      
+      case 'download':
+        return userPermissions.viewDownload || userPermissions.uploadViewAll;
+      
+      case 'share':
+        return userPermissions.generateLinks;
+      
+      case 'create_folder':
+        return userPermissions.createFolder;
+      
+      case 'invite_members':
+        return userPermissions.inviteMembers;
+      
+      default:
+        return false;
+    }
+  };
+
+  const canGrantScope = (scopeType) => {
+    if (currentUser?.role === 'owner') return true;
+    if (!userPermissions) return false;
+
+    // Get current user's scope from localStorage
+    const memberData = localStorage.getItem('currentMember');
+    if (memberData) {
+      const member = JSON.parse(memberData);
+      if (scopeType === 'entire') {
+        // Can only grant entire bucket access if user has entire bucket access
+        return member.scopeType === 'entire';
+      }
+      if (scopeType === 'specific') {
+        // Can grant specific folder access if user has any access
+        return true;
+      }
+    }
+    return false;
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -932,10 +1348,16 @@ export default function FileManager() {
           {/* Toolbar */}
           <div className="flex flex-wrap gap-4 items-center justify-between">
             <div className="flex items-center space-x-2">
-              {currentPath && (
+              {currentPath && !debouncedSearchTerm && (
                 <Button variant="outline" onClick={handleBackClick}>
                   <span className="mr-2">←</span>
                   Back
+                </Button>
+              )}
+              {debouncedSearchTerm && (
+                <Button variant="outline" onClick={() => setSearchTerm('')}>
+                  <span className="mr-2">←</span>
+                  Clear Search
                 </Button>
               )}
               <Button onClick={handleUploadClick}>
@@ -1055,7 +1477,7 @@ export default function FileManager() {
                             <div>
                               <span 
                                 className={file.type === 'folder' ? 'cursor-pointer hover:text-blue-600' : ''}
-                                onClick={() => file.type === 'folder' && handleFolderClick(file.name)}
+                                onClick={() => file.type === 'folder' && handleFolderClick(file.name, file.id)}
                               >
                                 {file.name}
                               </span>
@@ -1071,7 +1493,7 @@ export default function FileManager() {
                         <TableCell>{file.modified}</TableCell>
                         <TableCell>
                           <div className="flex space-x-1">
-                            {file.type === 'file' && (
+                            {file.type === 'file' && hasPermission('preview', file) && (
                               <Button 
                                 variant="ghost" 
                                 size="sm" 
@@ -1111,7 +1533,10 @@ export default function FileManager() {
                             <Button 
                               variant="ghost" 
                               size="sm" 
-                              onClick={() => handleDeleteSingle(file)}
+                              onClick={() => {
+                                console.log('Single delete clicked for:', file.name);
+                                handleDeleteSingle(file);
+                              }}
                               disabled={!hasPermission('delete')}
                               title="Delete"
                             >
@@ -1121,10 +1546,19 @@ export default function FileManager() {
                         </TableCell>
                       </TableRow>
                     ))}
-                    {filteredFiles.length === 0 && (
+                    {filteredFiles.length === 0 && !isLoadingAllFiles && (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center text-gray-500 py-8">
-                          {debouncedSearchTerm ? 'No files found' : 'This folder is empty'}
+                          {debouncedSearchTerm ? 'No files found' : 
+                           (userPermissions?.uploadViewOwn && !userPermissions?.uploadViewAll) ? 
+                           'You can view only files you uploaded' : 'This folder is empty'}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {isLoadingAllFiles && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-gray-500 py-8">
+                          Searching...
                         </TableCell>
                       </TableRow>
                     )}
@@ -1309,88 +1743,167 @@ export default function FileManager() {
               />
             </div>
             
-            <div className="space-y-3">
-              <Label className="text-base font-medium">Permissions</Label>
-              <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-base font-medium">Permissions</Label>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleShowCopyPermissions}
+                  className="w-full"
+                >
+                  Copy Permissions from Existing Member
+                </Button>
+              </div>
+              
+              {/* View and Upload side by side */}
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <Label className="text-sm font-medium">View Access (Base Layer)</Label>
+                  <div className="mt-1 space-y-1">
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="view"
+                        value="none"
+                        checked={invitePermissions.view === 'none'}
+                        onChange={(e) => setInvitePermissions(prev => ({
+                          ...prev, 
+                          view: e.target.value,
+                          download: false,
+                          share: false
+                        }))}
+                      />
+                      <span className="text-sm">No View</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="view"
+                        value="own"
+                        checked={invitePermissions.view === 'own'}
+                        disabled={!canGrantPermission('view', 'own')}
+                        onChange={(e) => setInvitePermissions(prev => ({...prev, view: e.target.value}))}
+                      />
+                      <span className={`text-sm ${!canGrantPermission('view', 'own') ? 'text-gray-400' : ''}`}>
+                        View Own Files
+                      </span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="view"
+                        value="all"
+                        checked={invitePermissions.view === 'all'}
+                        disabled={!canGrantPermission('view', 'all')}
+                        onChange={(e) => setInvitePermissions(prev => ({...prev, view: e.target.value}))}
+                      />
+                      <span className={`text-sm ${!canGrantPermission('view', 'all') ? 'text-gray-400' : ''}`}>
+                        View All Files
+                      </span>
+                    </label>
+                  </div>
+                </div>
+                
+                <div>
+                  <Label className="text-sm font-medium">Upload Access</Label>
+                  <div className="mt-1 space-y-1">
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="upload"
+                        value="none"
+                        checked={invitePermissions.upload === 'none'}
+                        onChange={(e) => setInvitePermissions(prev => ({
+                          ...prev, 
+                          upload: e.target.value,
+                          create_folder: false
+                        }))}
+                      />
+                      <span className="text-sm">No Upload</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="upload"
+                        value="own"
+                        checked={invitePermissions.upload === 'own'}
+                        disabled={!canGrantPermission('upload', 'own')}
+                        onChange={(e) => setInvitePermissions(prev => ({...prev, upload: e.target.value}))}
+                      />
+                      <span className={`text-sm ${!canGrantPermission('upload', 'own') ? 'text-gray-400' : ''}`}>
+                        Upload + Manage Own
+                      </span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="upload"
+                        value="all"
+                        checked={invitePermissions.upload === 'all'}
+                        disabled={!canGrantPermission('upload', 'all')}
+                        onChange={(e) => setInvitePermissions(prev => ({...prev, upload: e.target.value}))}
+                      />
+                      <span className={`text-sm ${!canGrantPermission('upload', 'all') ? 'text-gray-400' : ''}`}>
+                        Upload + Manage All
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Extra Permissions */}
+              <div>
+                <Label className="text-sm font-medium">Extra Permissions</Label>
+                <div className="mt-1 space-y-1">
+                  <label className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={invitePermissions.download}
+                      disabled={invitePermissions.view === 'none' || !canGrantPermission('download')}
+                      onChange={(e) => setInvitePermissions(prev => ({...prev, download: e.target.checked}))}
+                    />
+                    <span className={`text-sm ${invitePermissions.view === 'none' || !canGrantPermission('download') ? 'text-gray-400' : ''}`}>
+                      Download Files
+                    </span>
+                  </label>
+                  <label className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={invitePermissions.share}
+                      disabled={invitePermissions.view === 'none' || !canGrantPermission('share')}
+                      onChange={(e) => setInvitePermissions(prev => ({...prev, share: e.target.checked}))}
+                    />
+                    <span className={`text-sm ${invitePermissions.view === 'none' || !canGrantPermission('share') ? 'text-gray-400' : ''}`}>
+                      Generate Share Links
+                    </span>
+                  </label>
+                  <label className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={invitePermissions.create_folder}
+                      disabled={invitePermissions.upload === 'none' || !canGrantPermission('create_folder')}
+                      onChange={(e) => setInvitePermissions(prev => ({...prev, create_folder: e.target.checked}))}
+                    />
+                    <span className={`text-sm ${invitePermissions.upload === 'none' || !canGrantPermission('create_folder') ? 'text-gray-400' : ''}`}>
+                      Create Folders
+                    </span>
+                  </label>
+                </div>
+              </div>
+              
+              {/* Invite Members in bottom center */}
+              <div className="flex justify-center pt-2">
                 <label className="flex items-center space-x-2">
                   <input
                     type="checkbox"
-                    checked={invitePermissions.viewOnly}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, viewOnly: e.target.checked}))}
+                    checked={invitePermissions.invite_members}
+                    disabled={!canGrantPermission('invite_members')}
+                    onChange={(e) => setInvitePermissions(prev => ({...prev, invite_members: e.target.checked}))}
                   />
-                  <span className="text-sm">View Only</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.viewDownload}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, viewDownload: e.target.checked}))}
-                  />
-                  <span className="text-sm">View + Download</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.uploadOnly}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, uploadOnly: e.target.checked}))}
-                  />
-                  <span className="text-sm">Upload Only</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.uploadViewOwn}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, uploadViewOwn: e.target.checked}))}
-                  />
-                  <span className="text-sm">Upload + View Own</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.uploadViewAll}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, uploadViewAll: e.target.checked}))}
-                  />
-                  <span className="text-sm">Upload + View All</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.deleteFiles}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, deleteFiles: e.target.checked}))}
-                  />
-                  <span className="text-sm">Delete Files/Folders</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.generateLinks}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, generateLinks: e.target.checked}))}
-                  />
-                  <span className="text-sm">Generate Share Links</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.createFolder}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, createFolder: e.target.checked}))}
-                  />
-                  <span className="text-sm">Create Folders</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.deleteOwnFiles}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, deleteOwnFiles: e.target.checked}))}
-                  />
-                  <span className="text-sm">Delete Own Files</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={invitePermissions.inviteMembers}
-                    onChange={(e) => setInvitePermissions(prev => ({...prev, inviteMembers: e.target.checked}))}
-                  />
-                  <span className="text-sm">Invite Members</span>
+                  <span className={`text-sm font-bold ${!canGrantPermission('invite_members') ? 'text-gray-400' : ''}`}>
+                    Invite Members
+                  </span>
                 </label>
               </div>
             </div>
@@ -1404,9 +1917,12 @@ export default function FileManager() {
                     name="scope"
                     value="entire"
                     checked={scopeType === 'entire'}
+                    disabled={!canGrantScope('entire')}
                     onChange={(e) => setScopeType(e.target.value)}
                   />
-                  <span className="text-sm">Entire Bucket</span>
+                  <span className={`text-sm ${!canGrantScope('entire') ? 'text-gray-400' : ''}`}>
+                    Entire Bucket
+                  </span>
                 </label>
                 <label className="flex items-center space-x-2">
                   <input
@@ -1414,45 +1930,48 @@ export default function FileManager() {
                     name="scope"
                     value="specific"
                     checked={scopeType === 'specific'}
+                    disabled={!canGrantScope('specific')}
                     onChange={(e) => setScopeType(e.target.value)}
                   />
-                  <span className="text-sm">Specific Folder(s)</span>
-                </label>
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="radio"
-                    name="scope"
-                    value="nested"
-                    checked={scopeType === 'nested'}
-                    onChange={(e) => setScopeType(e.target.value)}
-                  />
-                  <span className="text-sm">Nested Folders (with inheritance)</span>
+                  <span className={`text-sm ${!canGrantScope('specific') ? 'text-gray-400' : ''}`}>
+                    Specific Folder (includes all subfolders)
+                  </span>
                 </label>
               </div>
             </div>
             
             {scopeType === 'specific' && (
               <div className="space-y-2">
-                <Label>Select Folders</Label>
-                <div className="max-h-32 overflow-y-auto border rounded p-2 space-y-1">
-                  {availableFolders.map(folder => (
-                    <label key={folder} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedFolders.includes(folder)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedFolders(prev => [...prev, folder]);
-                          } else {
-                            setSelectedFolders(prev => prev.filter(f => f !== folder));
-                          }
-                        }}
+                <Label>Select Folders (Multi-select supported)</Label>
+                <div className="border rounded p-3">
+                  <div className="max-h-48 overflow-y-auto">
+                    {Object.keys(folderTree).length > 0 ? (
+                      <FolderTreeNode 
+                        tree={folderTree}
+                        level={0}
+                        expandedFolders={expandedFolders}
+                        selectedFolderPaths={selectedFolderPaths}
+                        onToggleExpansion={toggleFolderExpansion}
+                        onFolderSelect={handleFolderSelect}
+                        isChildOfSelected={isChildOfSelected}
                       />
-                      <span className="text-sm">{folder}</span>
-                    </label>
-                  ))}
-                  {availableFolders.length === 0 && (
-                    <p className="text-sm text-gray-500">No folders found in this bucket</p>
+                    ) : (
+                      <p className="text-sm text-gray-500">No folders found</p>
+                    )}
+                  </div>
+                  
+                  {selectedFolderPaths.size > 0 && (
+                    <div className="mt-3 p-2 bg-blue-50 rounded">
+                      <span className="text-sm font-medium">Selected paths: </span>
+                      <div className="mt-1 space-y-1">
+                        {Array.from(selectedFolderPaths).map(path => (
+                          <div key={path} className="text-sm text-blue-600">/{path}</div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Each selected folder includes all its subfolders and files
+                      </p>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1468,6 +1987,51 @@ export default function FileManager() {
             </Button>
             <Button onClick={handleSendInvite} disabled={!inviteEmail.trim()}>
               Send Invitation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Copy Permissions Modal */}
+      <Dialog open={showCopyPermissions} onOpenChange={setShowCopyPermissions}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Copy Permissions from Member</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Select Member to Copy From</Label>
+              <div className="max-h-48 overflow-y-auto border rounded p-2">
+                {availableMembers.length > 0 ? (
+                  availableMembers.map(member => (
+                    <div key={member.email} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                      <div>
+                        <div className="text-sm font-medium">{member.email}</div>
+                        <div className="text-xs text-gray-500">
+                          {member.scope_type === 'entire' ? 'Entire Bucket' : 
+                           member.scope_type === 'specific' ? 'Specific Folders' : 'Limited Access'}
+                        </div>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleCopyPermissions(member.email)}
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-sm text-gray-500">Loading members...</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCopyPermissions(false)}>
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
