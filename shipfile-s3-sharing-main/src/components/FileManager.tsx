@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Upload, Download, Trash2, Eye, Share, Folder, 
   File, Image, FileText, Archive, Music, Video,
-  Search, Filter, Grid, List, Plus, Settings, UserPlus, Building
+  Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit
 } from "lucide-react";
 import { useClerk } from "@clerk/clerk-react";
 import React from "react";
@@ -90,6 +90,12 @@ export default function FileManager() {
   const [selectedFolders, setSelectedFolders] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [userPermissions, setUserPermissions] = useState(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
@@ -537,6 +543,8 @@ export default function FileManager() {
         return userPermissions.createFolder;
       case 'invite':
         return userPermissions.inviteMembers;
+      case 'rename':
+        return userPermissions.uploadOnly || userPermissions.uploadViewOwn || userPermissions.uploadViewAll || userPermissions.deleteFiles;
       default:
         return false;
     }
@@ -658,6 +666,128 @@ export default function FileManager() {
     }
   };
 
+  const handleRename = async (file) => {
+    const newName = prompt(`Rename ${file.type}:`, file.name);
+    if (!newName || newName === file.name) return;
+
+    try {
+      const response = await fetch('http://localhost:3001/api/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bucketName: currentBucket,
+          oldKey: file.id,
+          newName: newName,
+          type: file.type,
+          currentPath: currentPath,
+          userEmail: currentUser?.email
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to rename');
+      }
+      
+      loadFiles(); // Refresh the file list
+      alert(`${file.type === 'folder' ? 'Folder' : 'File'} renamed successfully!`);
+    } catch (error) {
+      console.error('Rename failed:', error);
+      alert(error.message || 'Failed to rename');
+    }
+  };
+
+  const handleDeleteSingle = async (file) => {
+    if (!hasPermission('delete')) {
+      alert('You do not have permission to perform DELETE on this bucket. Please contact the owner for access.');
+      return;
+    }
+
+    if (!confirm(`Delete ${file.name}?`)) return;
+
+    try {
+      const response = await fetch('http://localhost:3001/api/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bucketName: currentBucket,
+          items: [file.id],
+          userEmail: currentUser?.email
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete');
+      }
+      
+      loadFiles(); // Refresh the file list
+      alert(`${file.type === 'folder' ? 'Folder' : 'File'} deleted successfully!`);
+    } catch (error) {
+      console.error('Delete failed:', error);
+      alert(error.message || 'Failed to delete');
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    if (!passwordData.newPassword || !passwordData.confirmPassword) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      alert('New passwords do not match');
+      return;
+    }
+
+    if (passwordData.newPassword.length < 6) {
+      alert('Password must be at least 6 characters');
+      return;
+    }
+
+    try {
+      const endpoint = currentUser?.role === 'owner' ? '/api/owner/change-password' : '/api/member/change-password';
+      
+      const response = await fetch(`http://localhost:3001${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: currentUser?.email,
+          currentPassword: passwordData.currentPassword,
+          newPassword: passwordData.newPassword
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        if (data.isGoogleUser) {
+          alert(data.error);
+          setShowPasswordModal(false);
+          setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+          return;
+        }
+        throw new Error(data.error || 'Failed to change password');
+      }
+      
+      alert('Password changed successfully! Please login again.');
+      setShowPasswordModal(false);
+      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      
+      // Logout user
+      localStorage.removeItem('currentMember');
+      localStorage.removeItem('currentOwner');
+      if (currentUser?.role === 'owner') {
+        signOut();
+      } else {
+        window.location.href = '/login';
+      }
+    } catch (error) {
+      console.error('Password change failed:', error);
+      alert(error.message || 'Failed to change password');
+    }
+  };
+
   // Load user data on component mount
   React.useEffect(() => {
     const memberData = localStorage.getItem('currentMember');
@@ -719,7 +849,7 @@ export default function FileManager() {
                 Invite Member
               </Button>
             )}
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => setShowPasswordModal(true)}>
               <Settings className="h-4 w-4" />
             </Button>
             {currentUser?.email && (
@@ -758,7 +888,11 @@ export default function FileManager() {
                 Upload
               </Button>
               {selectedFiles.length === 0 && (
-                <Button variant="outline" onClick={handleNewFolderClick}>
+                <Button 
+                  variant="outline" 
+                  onClick={handleNewFolderClick}
+                  disabled={!hasPermission('createFolder')}
+                >
                   <Plus className="h-4 w-4 mr-2" />
                   New Folder
                 </Button>
@@ -902,6 +1036,24 @@ export default function FileManager() {
                               title="Share"
                             >
                               <Share className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => handleRename(file)}
+                              disabled={!hasPermission('rename')}
+                              title="Rename"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => handleDeleteSingle(file)}
+                              disabled={!hasPermission('delete')}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </TableCell>
@@ -1247,6 +1399,55 @@ export default function FileManager() {
             </Button>
             <Button onClick={handleSendInvite} disabled={!inviteEmail.trim()}>
               Send Invitation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Password Change Modal */}
+      <Dialog open={showPasswordModal} onOpenChange={setShowPasswordModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Current Password</Label>
+              <Input
+                type="password"
+                placeholder="Enter current password"
+                value={passwordData.currentPassword}
+                onChange={(e) => setPasswordData(prev => ({...prev, currentPassword: e.target.value}))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>New Password</Label>
+              <Input
+                type="password"
+                placeholder="Enter new password (min 6 characters)"
+                value={passwordData.newPassword}
+                onChange={(e) => setPasswordData(prev => ({...prev, newPassword: e.target.value}))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Confirm New Password</Label>
+              <Input
+                type="password"
+                placeholder="Confirm new password"
+                value={passwordData.confirmPassword}
+                onChange={(e) => setPasswordData(prev => ({...prev, confirmPassword: e.target.value}))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setShowPasswordModal(false);
+              setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+            }}>
+              Cancel
+            </Button>
+            <Button onClick={handlePasswordChange}>
+              Change Password
             </Button>
           </DialogFooter>
         </DialogContent>

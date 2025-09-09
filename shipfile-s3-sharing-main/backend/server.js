@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { S3Client, CreateBucketCommand, ListObjectsV2Command, PutBucketCorsCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, PutObjectAclCommand } from '@aws-sdk/client-s3';
+import { S3Client, CreateBucketCommand, ListObjectsV2Command, PutBucketCorsCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, PutObjectAclCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import archiver from 'archiver';
@@ -1230,6 +1230,98 @@ app.get('/api/shared-folder/:shareId/download/*', async (req, res) => {
   }
 });
 
+// Rename file or folder
+app.post('/api/rename', async (req, res) => {
+  const { bucketName, oldKey, newName, type, currentPath, userEmail } = req.body;
+
+  try {
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!bucket) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+
+    if (type === 'folder') {
+      // For folders, rename all objects with the folder prefix
+      const oldPrefix = oldKey.endsWith('/') ? oldKey : oldKey + '/';
+      const newPrefix = currentPath ? `${currentPath}/${newName}/` : `${newName}/`;
+      
+      // List all objects in the folder
+      const listCommand = new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: oldPrefix
+      });
+      
+      const listResponse = await s3Client.send(listCommand);
+      
+      if (listResponse.Contents && listResponse.Contents.length > 0) {
+        // Copy each object to new location
+        for (const obj of listResponse.Contents) {
+          const newKey = obj.Key.replace(oldPrefix, newPrefix);
+          
+          const copyCommand = new CopyObjectCommand({
+            Bucket: bucketName,
+            CopySource: `${bucketName}/${obj.Key}`,
+            Key: newKey
+          });
+          
+          await s3Client.send(copyCommand);
+        }
+        
+        // Delete old objects
+        const deleteObjects = listResponse.Contents.map(obj => ({ Key: obj.Key }));
+        const deleteCommand = new DeleteObjectsCommand({
+          Bucket: bucketName,
+          Delete: { Objects: deleteObjects }
+        });
+        
+        await s3Client.send(deleteCommand);
+      }
+    } else {
+      // For files, copy to new name and delete old
+      const fileExtension = oldKey.split('.').pop();
+      const newKey = currentPath ? `${currentPath}/${newName}` : newName;
+      
+      // Add extension if not present
+      const finalNewKey = newName.includes('.') ? newKey : `${newKey}.${fileExtension}`;
+      
+      const copyCommand = new CopyObjectCommand({
+        Bucket: bucketName,
+        CopySource: `${bucketName}/${oldKey}`,
+        Key: finalNewKey
+      });
+      
+      await s3Client.send(copyCommand);
+      
+      const deleteCommand = new DeleteObjectCommand({
+        Bucket: bucketName,
+        Key: oldKey
+      });
+      
+      await s3Client.send(deleteCommand);
+    }
+
+    res.json({ success: true, message: 'Renamed successfully' });
+
+  } catch (error) {
+    console.error('Rename error:', error);
+    res.status(500).json({ error: 'Failed to rename' });
+  }
+});
+
 // Member Google login
 app.post('/api/member/google-login', async (req, res) => {
   const { email } = req.body;
@@ -1256,6 +1348,47 @@ app.post('/api/member/google-login', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Google login failed' });
+  }
+});
+
+// Change member password
+app.post('/api/member/change-password', async (req, res) => {
+  const { email, currentPassword, newPassword } = req.body;
+  
+  try {
+    db.get('SELECT * FROM members WHERE email = ? AND password = ?', [email, currentPassword], (err, member) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+      if (!member) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+      
+      db.run('UPDATE members SET password = ? WHERE email = ?', [newPassword, email], function(err) {
+        if (err) {
+          return res.status(500).json({ error: 'Failed to update password' });
+        }
+        
+        res.json({ message: 'Password changed successfully' });
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Password change failed' });
+  }
+});
+
+// Change owner password (for Google login users)
+app.post('/api/owner/change-password', async (req, res) => {
+  const { email, currentPassword, newPassword } = req.body;
+  
+  try {
+    // Owners use Google login, they don't have passwords in our database
+    return res.status(400).json({ 
+      error: 'You are signed in with Google. Please change your password through your Google account settings.',
+      isGoogleUser: true
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Password change failed' });
   }
 });
 
