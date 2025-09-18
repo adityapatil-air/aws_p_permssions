@@ -800,7 +800,14 @@ app.get('/api/buckets/:bucketName/files', async (req, res) => {
       
       if (!prefix) {
         // Root directory - show the deepest allowed folders directly with virtual mapping
-        const virtualFolders = allowedFolders.map(path => {
+        console.log('=== SCOPED MEMBER ROOT ACCESS ===');
+        console.log('User:', userEmail);
+        console.log('Allowed folders from DB:', allowedFolders);
+        console.log('Member scope data:', member);
+        
+        // Remove duplicates and create virtual folders
+        const uniquePaths = [...new Set(allowedFolders)];
+        const virtualFolders = uniquePaths.map(path => {
           const parts = path.split('/');
           const folderName = parts[parts.length - 1]; // Last part (deepest folder)
           
@@ -1804,6 +1811,54 @@ app.post('/api/rename', async (req, res) => {
         
         await s3Client.send(deleteCommand);
       }
+      
+      // Update member permissions that reference the old folder path
+      const oldFolderPath = oldPrefix.replace(/\/$/, ''); // Remove trailing slash
+      const newFolderPath = newPrefix.replace(/\/$/, ''); // Remove trailing slash
+      
+      db.all('SELECT email, scope_folders FROM members WHERE bucket_name = ? AND scope_type = "specific"', [bucketName], (err, members) => {
+        if (err) {
+          console.error('Error fetching members for folder rename update:', err);
+          return;
+        }
+        
+        members.forEach(member => {
+          try {
+            const scopeFolders = JSON.parse(member.scope_folders || '[]');
+            let updated = false;
+            
+            const updatedFolders = scopeFolders
+              .map(folder => {
+                if (folder === oldFolderPath || folder.startsWith(oldFolderPath + '/')) {
+                  updated = true;
+                  return folder.replace(oldFolderPath, newFolderPath);
+                }
+                return folder;
+              })
+              .filter((folder, index, arr) => {
+                // Remove duplicates - keep only unique folder paths
+                return arr.indexOf(folder) === index;
+              });
+            
+            if (updated) {
+              console.log(`Updating permissions for ${member.email}:`);
+              console.log(`  Old folders: ${JSON.stringify(scopeFolders)}`);
+              console.log(`  New folders: ${JSON.stringify(updatedFolders)}`);
+              
+              db.run('UPDATE members SET scope_folders = ? WHERE email = ? AND bucket_name = ?', 
+                [JSON.stringify(updatedFolders), member.email, bucketName], (updateErr) => {
+                if (updateErr) {
+                  console.error('Error updating member permissions after folder rename:', updateErr);
+                } else {
+                  console.log(`✅ Updated permissions for ${member.email}`);
+                }
+              });
+            }
+          } catch (parseErr) {
+            console.error('Error parsing scope_folders for member:', member.email, parseErr);
+          }
+        });
+      });
     } else {
       // For files, copy to new name and delete old
       const fileExtension = oldKey.split('.').pop();
@@ -1828,7 +1883,7 @@ app.post('/api/rename', async (req, res) => {
       await s3Client.send(deleteCommand);
     }
 
-    // Update ownership record for renamed file
+    // Update ownership records for renamed files/folders
     if (type === 'file') {
       const fileExtension = oldKey.split('.').pop();
       const newKey = currentPath ? `${currentPath}/${newName}` : newName;
@@ -1838,6 +1893,30 @@ app.post('/api/rename', async (req, res) => {
         [finalNewKey, bucketName, oldKey], (err) => {
         if (err) console.error('Error updating ownership record:', err);
         else console.log('Updated ownership record:', oldKey, '->', finalNewKey);
+      });
+    } else if (type === 'folder') {
+      // Update ownership records for all files in the renamed folder
+      const oldPrefix = oldKey.endsWith('/') ? oldKey : oldKey + '/';
+      const newPrefix = currentPath ? `${currentPath}/${newName}/` : `${newName}/`;
+      
+      db.all('SELECT file_path FROM file_ownership WHERE bucket_name = ? AND file_path LIKE ?', 
+        [bucketName, oldPrefix + '%'], (err, files) => {
+        if (err) {
+          console.error('Error fetching ownership records for folder rename:', err);
+          return;
+        }
+        
+        files.forEach(file => {
+          const newFilePath = file.file_path.replace(oldPrefix, newPrefix);
+          db.run('UPDATE file_ownership SET file_path = ? WHERE bucket_name = ? AND file_path = ?', 
+            [newFilePath, bucketName, file.file_path], (updateErr) => {
+            if (updateErr) {
+              console.error('Error updating ownership record for file in renamed folder:', updateErr);
+            } else {
+              console.log('Updated ownership record:', file.file_path, '->', newFilePath);
+            }
+          });
+        });
       });
     }
     
@@ -2415,6 +2494,40 @@ app.post('/api/test-invite', async (req, res) => {
       error: error.message,
       testData: testData
     });
+  }
+});
+
+// Debug member permissions
+app.get('/api/debug/member/:email', async (req, res) => {
+  const { email } = req.params;
+  const { bucketName } = req.query;
+  
+  try {
+    db.get('SELECT email, scope_folders, scope_type FROM members WHERE email = ? AND bucket_name = ?', 
+      [email, bucketName], (err, member) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+      if (!member) {
+        return res.status(404).json({ error: 'Member not found' });
+      }
+      
+      let scopeFolders = [];
+      try {
+        scopeFolders = JSON.parse(member.scope_folders || '[]');
+      } catch (e) {
+        scopeFolders = [];
+      }
+      
+      res.json({
+        email: member.email,
+        scopeType: member.scope_type,
+        scopeFolders: scopeFolders,
+        rawScopeFolders: member.scope_folders
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get member info' });
   }
 });
 

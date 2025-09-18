@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Badge } from "@/components/ui/badge";
 import { 
   Upload, Download, Trash2, Eye, Share, Folder, 
-  File, Image, FileText, Archive, Music, Video,
+  File, Image, FileText, Archive, Music, Video, Play,
   Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit
 } from "lucide-react";
 import { useClerk } from "@clerk/clerk-react";
@@ -38,14 +38,18 @@ const getFileIcon = (type: string, fileType?: string) => {
   switch (fileType?.toLowerCase()) {
     case 'jpg': case 'jpeg': case 'png': case 'gif':
       return <Image className="h-4 w-4 text-green-500" />;
-    case 'pdf': case 'doc': case 'docx': case 'txt':
+    case 'pdf': case 'txt':
       return <FileText className="h-4 w-4 text-red-500" />;
+    case 'doc': case 'docx':
+      return <FileText className="h-4 w-4 text-blue-500" />;
+    case 'ppt': case 'pptx':
+      return <Play className="h-4 w-4 text-orange-600" />;
     case 'zip': case 'rar': case '7z':
       return <Archive className="h-4 w-4 text-yellow-500" />;
     case 'mp3': case 'wav': case 'flac':
       return <Music className="h-4 w-4 text-purple-500" />;
     case 'mp4': case 'avi': case 'mkv':
-      return <Video className="h-4 w-4 text-orange-500" />;
+      return <Video className="h-4 w-4 text-green-600" />;
     default:
       return <File className="h-4 w-4 text-gray-500" />;
   }
@@ -168,6 +172,23 @@ export default function FileManager() {
   const [editSelectedFolders, setEditSelectedFolders] = useState([]);
   const [showLogs, setShowLogs] = useState(false);
   const [activityLogs, setActivityLogs] = useState([]);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState({
+    title: '',
+    message: '',
+    confirmText: '',
+    onConfirm: () => {},
+    type: 'danger'
+  });
+  const [showPromptDialog, setShowPromptDialog] = useState(false);
+  const [promptConfig, setPromptConfig] = useState({
+    title: '',
+    message: '',
+    defaultValue: '',
+    onConfirm: () => {}
+  });
+  const [promptValue, setPromptValue] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
@@ -334,7 +355,14 @@ export default function FileManager() {
         console.log(`Uploaded ${file.name} successfully`);
       } catch (error) {
         console.error(`Failed to upload ${file.name}:`, error);
-        alert(`Failed to upload ${file.name}`);
+        setConfirmConfig({
+          title: 'Upload Error',
+          message: `Failed to upload ${file.name}. Please try again.`,
+          confirmText: 'OK',
+          onConfirm: () => {},
+          type: 'info'
+        });
+        setShowConfirmDialog(true);
       }
     }
     
@@ -370,7 +398,14 @@ export default function FileManager() {
       loadFiles();
     } catch (error) {
       console.error('Failed to create folder:', error);
-      alert('Failed to create folder');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Failed to create folder. Please try again.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
@@ -526,7 +561,14 @@ export default function FileManager() {
       alert('Organization created successfully!');
     } catch (error) {
       console.error('Failed to create organization:', error);
-      alert('Failed to create organization');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Failed to create organization. Please try again.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
   
@@ -662,13 +704,34 @@ export default function FileManager() {
       setSelectedMemberToCopy('');
       
       if (data.emailSent) {
-        alert(`Invitation email sent successfully to ${inviteEmail}!`);
+        setConfirmConfig({
+          title: 'Success',
+          message: `Invitation email sent successfully to ${inviteEmail}!`,
+          confirmText: 'OK',
+          onConfirm: () => {},
+          type: 'success'
+        });
+        setShowConfirmDialog(true);
       } else {
-        alert(`Invitation created! Share this link with ${inviteEmail}:\n\n${data.inviteLink}`);
+        setConfirmConfig({
+          title: 'Invitation Created',
+          message: `Share this link with ${inviteEmail}:\n\n${data.inviteLink}`,
+          confirmText: 'Copy Link',
+          onConfirm: () => navigator.clipboard.writeText(data.inviteLink),
+          type: 'success'
+        });
+        setShowConfirmDialog(true);
       }
     } catch (error) {
       console.error('Failed to send invitation:', error);
-      alert(error.message || 'Failed to send invitation');
+      setConfirmConfig({
+        title: 'Error',
+        message: error.message || 'Failed to send invitation',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
   
@@ -733,7 +796,14 @@ export default function FileManager() {
       
     } catch (error) {
       console.error('Download failed:', error);
-      alert('Download failed');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Download failed. Please try again.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
@@ -741,8 +811,20 @@ export default function FileManager() {
     console.log('Bulk deleting files:', selectedFiles);
     if (selectedFiles.length === 0) return;
     
-    if (!confirm(`Delete ${selectedFiles.length} item(s)?`)) return;
-    
+    setConfirmConfig({
+      title: 'Delete Items',
+      message: `Are you sure you want to delete ${selectedFiles.length} item(s)? This action cannot be undone.`,
+      confirmText: 'delete',
+      onConfirm: () => performBulkDelete(),
+      type: 'danger',
+      requiresTyping: true
+    });
+    setDeleteConfirmText('');
+    setShowConfirmDialog(true);
+    return;
+  };
+
+  const performBulkDelete = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/delete', {
         method: 'DELETE',
@@ -758,10 +840,16 @@ export default function FileManager() {
       
       setSelectedFiles([]);
       await loadFiles();
-      
     } catch (error) {
       console.error('Delete failed:', error);
-      alert('Delete failed');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Delete failed. Please try again.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
@@ -801,7 +889,14 @@ export default function FileManager() {
       
     } catch (error) {
       console.error('Share failed:', error);
-      alert('Failed to generate share link');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Failed to generate share link. Please try again.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     } finally {
       setIsGeneratingLink(false);
     }
@@ -809,7 +904,15 @@ export default function FileManager() {
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(shareLink);
-    alert('Link copied to clipboard!');
+    setConfirmConfig({
+      title: 'Success',
+      message: 'Link copied to clipboard!',
+      confirmText: 'OK',
+      onConfirm: () => {},
+      type: 'success'
+    });
+    setShowConfirmDialog(true);
+    setTimeout(() => setShowConfirmDialog(false), 1500);
   };
 
   const hasPermission = (action, file = null) => {
@@ -873,7 +976,14 @@ export default function FileManager() {
 
   const handleUploadClick = () => {
     if (!hasPermission('upload')) {
-      alert('You do not have permission to perform UPLOAD on this bucket. Please contact the owner for access.');
+      setConfirmConfig({
+        title: 'Permission Denied',
+        message: 'You do not have permission to upload files. Please contact the owner for access.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
     
@@ -881,11 +991,17 @@ export default function FileManager() {
     const memberData = localStorage.getItem('currentMember');
     if (memberData && !currentPath) {
       const member = JSON.parse(memberData);
-      console.log('Member data for upload check:', member);
       
       // Check if member has specific folder scope (not entire bucket access)
       if (member.scopeType === 'specific' || (member.scopeFolders && member.scopeFolders.length > 0)) {
-        alert('Please enter a folder first before uploading files.');
+        setConfirmConfig({
+          title: 'Access Restricted',
+          message: 'Please navigate to a folder first before uploading files.',
+          confirmText: 'OK',
+          onConfirm: () => {},
+          type: 'info'
+        });
+        setShowConfirmDialog(true);
         return;
       }
     }
@@ -895,7 +1011,14 @@ export default function FileManager() {
 
   const handleShareClick = () => {
     if (!hasPermission('share')) {
-      alert('You do not have permission to perform SHARE on this bucket. Please contact the owner for access.');
+      setConfirmConfig({
+        title: 'Permission Denied',
+        message: 'You do not have permission to share files. Please contact the owner for access.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
     setShowShareModal(true);
@@ -907,7 +1030,14 @@ export default function FileManager() {
     const canDeleteAll = selectedFileObjects.every(file => hasPermission('delete', file));
     
     if (!canDeleteAll) {
-      alert('You do not have permission to delete some of the selected files. You can only delete files you uploaded.');
+      setConfirmConfig({
+        title: 'Permission Denied',
+        message: 'You do not have permission to delete some of the selected files. You can only delete files you uploaded.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
     handleDelete();
@@ -915,7 +1045,14 @@ export default function FileManager() {
 
   const handleNewFolderClick = () => {
     if (!hasPermission('createFolder')) {
-      alert('You do not have permission to perform CREATE FOLDER on this bucket. Please contact the owner for access.');
+      setConfirmConfig({
+        title: 'Permission Denied',
+        message: 'You do not have permission to create folders. Please contact the owner for access.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
     
@@ -923,11 +1060,17 @@ export default function FileManager() {
     const memberData = localStorage.getItem('currentMember');
     if (memberData && !currentPath) {
       const member = JSON.parse(memberData);
-      console.log('Member data for folder check:', member);
       
       // Check if member has specific folder scope (not entire bucket access)
       if (member.scopeType === 'specific' || (member.scopeFolders && member.scopeFolders.length > 0)) {
-        alert('Please enter a folder first before creating new folders.');
+        setConfirmConfig({
+          title: 'Access Restricted',
+          message: 'Please navigate to a folder first before creating new folders.',
+          confirmText: 'OK',
+          onConfirm: () => {},
+          type: 'info'
+        });
+        setShowConfirmDialog(true);
         return;
       }
     }
@@ -942,7 +1085,14 @@ export default function FileManager() {
     const previewableTypes = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'txt', 'html', 'css', 'js', 'json'];
     
     if (!previewableTypes.includes(fileExt)) {
-      alert(`Preview not available for ${fileExt?.toUpperCase() || 'this'} files. Use download to view the file.`);
+      setConfirmConfig({
+        title: 'Preview Not Available',
+        message: `Preview not available for ${fileExt?.toUpperCase() || 'this'} files. Use download to view the file.`,
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
     
@@ -954,7 +1104,14 @@ export default function FileManager() {
 
   const handleDownloadSingle = async (file) => {
     if (!hasPermission('download')) {
-      alert('You do not have permission to perform DOWNLOAD on this bucket. Please contact the owner for access.');
+      setConfirmConfig({
+        title: 'Permission Denied',
+        message: 'You do not have permission to download files. Please contact the owner for access.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
 
@@ -980,13 +1137,27 @@ export default function FileManager() {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Download failed:', error);
-      alert('Download failed');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Download failed. Please try again.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
   const handleShareSingle = async (file) => {
     if (!hasPermission('share')) {
-      alert('You do not have permission to perform SHARE on this bucket. Please contact the owner for access.');
+      setConfirmConfig({
+        title: 'Permission Denied',
+        message: 'You do not have permission to share files. Please contact the owner for access.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
 
@@ -1008,24 +1179,57 @@ export default function FileManager() {
       const data = await response.json();
       navigator.clipboard.writeText(data.shareUrl);
       
-      if (file.type === 'folder') {
-        alert('Folder share link copied to clipboard! Recipients can browse and download files from this folder.');
-      } else {
-        alert('File share link copied to clipboard!');
-      }
+      const message = file.type === 'folder' 
+        ? 'Folder share link copied to clipboard! Recipients can browse and download files from this folder.'
+        : 'File share link copied to clipboard!';
+      
+      setConfirmConfig({
+        title: 'Success',
+        message: message,
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'success'
+      });
+      setShowConfirmDialog(true);
+      setTimeout(() => setShowConfirmDialog(false), 2000);
     } catch (error) {
       console.error('Share failed:', error);
-      alert('Failed to generate share link');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Failed to generate share link. Please try again.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
   const handleRename = async (file) => {
     if (!hasPermission('rename', file)) {
-      alert('You do not have permission to rename this file. You can only rename files you uploaded.');
+      setConfirmConfig({
+        title: 'Permission Denied',
+        message: 'You do not have permission to rename this file. You can only rename files you uploaded.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
     
-    const newName = prompt(`Rename ${file.type}:`, file.name);
+    setPromptConfig({
+      title: `Rename ${file.type}`,
+      message: `Enter new name for "${file.name}":`,
+      defaultValue: file.name,
+      onConfirm: (newName) => performRename(file, newName)
+    });
+    setPromptValue(file.name);
+    setShowPromptDialog(true);
+    return;
+  };
+
+  const performRename = async (file, newName) => {
     if (!newName || newName === file.name) return;
 
     try {
@@ -1048,33 +1252,75 @@ export default function FileManager() {
       }
       
       await loadFiles(); // Refresh the file list
-      alert(`${file.type === 'folder' ? 'Folder' : 'File'} renamed successfully!`);
+      
+      // Refresh member permissions if user is a member (in case folder permissions were updated)
+      const memberData = localStorage.getItem('currentMember');
+      if (memberData) {
+        try {
+          const member = JSON.parse(memberData);
+          const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(member.email)}/permissions?bucketName=${currentBucket}`);
+          if (response.ok) {
+            const updatedMemberData = await response.json();
+            const refreshedMember = {
+              ...member,
+              permissions: updatedMemberData.permissions,
+              scopeType: updatedMemberData.scope_type,
+              scopeFolders: updatedMemberData.scope_folders
+            };
+            localStorage.setItem('currentMember', JSON.stringify(refreshedMember));
+            console.log('Refreshed member permissions after rename');
+          }
+        } catch (error) {
+          console.error('Failed to refresh member permissions:', error);
+        }
+      }
     } catch (error) {
       console.error('Rename failed:', error);
-      alert(error.message || 'Failed to rename');
+      setConfirmConfig({
+        title: 'Error',
+        message: error.message || 'Failed to rename',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
   const handleDeleteSingle = async (file) => {
     console.log('Deleting file:', file.name, 'ID:', file.id);
     if (!hasPermission('delete', file)) {
-      alert('You do not have permission to delete this file. You can only delete files you uploaded.');
+      setConfirmConfig({
+        title: 'Permission Denied',
+        message: 'You do not have permission to delete this file. You can only delete files you uploaded.',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
 
-    if (!confirm(`Delete ${file.name}?`)) return;
+    setConfirmConfig({
+      title: 'Delete File',
+      message: `Are you sure you want to delete "${file.name}"? This action cannot be undone.`,
+      confirmText: 'delete',
+      onConfirm: () => performSingleDelete(file),
+      type: 'danger',
+      requiresTyping: true
+    });
+    setDeleteConfirmText('');
+    setShowConfirmDialog(true);
+    return;
+  };
 
+  const performSingleDelete = async (file) => {
     try {
-      console.log('Sending delete request for:', file.id);
-      console.log('Current user email:', currentUser?.email);
-      
       const deletePayload = {
         bucketName: currentBucket,
         items: [file.id],
         userEmail: currentUser?.email
       };
-      
-      console.log('Delete payload:', deletePayload);
       
       const response = await fetch('http://localhost:3001/api/delete', {
         method: 'DELETE',
@@ -1082,28 +1328,22 @@ export default function FileManager() {
         body: JSON.stringify(deletePayload)
       });
       
-      console.log('Delete response status:', response.status);
-      console.log('Delete response ok:', response.ok);
-      
       if (!response.ok) {
         const error = await response.json();
-        console.error('Delete failed:', error);
         throw new Error(error.error || 'Failed to delete');
       }
       
-      const result = await response.json();
-      console.log('Delete response:', result);
-      
-      console.log('Refreshing file list after delete...');
       await loadFiles(); // Refresh the file list
-      console.log('File list refreshed');
-      
-      alert(`${file.type === 'folder' ? 'Folder' : 'File'} deleted successfully!`);
     } catch (error) {
-      console.error('Delete failed - Full error:', error);
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-      alert(error.message || 'Failed to delete');
+      console.error('Delete failed:', error);
+      setConfirmConfig({
+        title: 'Error',
+        message: error.message || 'Failed to delete',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
@@ -1671,11 +1911,21 @@ export default function FileManager() {
             <h1 className="text-2xl font-bold">ShipFile</h1>
             <div className="flex items-center space-x-1 text-sm">
               {(() => {
+                // Always refresh member data from localStorage to get latest permissions
                 const memberData = localStorage.getItem('currentMember');
                 if (memberData) {
                   const member = JSON.parse(memberData);
                   if (member.scopeType === 'specific' && member.scopeFolders) {
-                    const scopeFolders = JSON.parse(member.scopeFolders);
+                    // Parse fresh scope folders (in case they were updated after rename)
+                    let scopeFolders;
+                    try {
+                      scopeFolders = typeof member.scopeFolders === 'string' 
+                        ? JSON.parse(member.scopeFolders) 
+                        : member.scopeFolders;
+                    } catch (e) {
+                      scopeFolders = [];
+                    }
+                    
                     if (scopeFolders.length === 1) {
                       // Show only the deepest folder name as root
                       const scopeFolder = scopeFolders[0];
@@ -2875,6 +3125,74 @@ export default function FileManager() {
             </Button>
             <Button onClick={handlePasswordChange}>
               Change Password
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modern Confirmation Dialog */}
+      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirmConfig.title}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">{confirmConfig.message}</p>
+            {confirmConfig.requiresTyping && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Type "delete" to confirm:</p>
+                <Input
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="delete"
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowConfirmDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant={confirmConfig.type === 'danger' ? 'destructive' : 'default'}
+              onClick={() => {
+                setShowConfirmDialog(false);
+                confirmConfig.onConfirm();
+              }}
+              disabled={confirmConfig.requiresTyping && deleteConfirmText !== 'delete'}
+            >
+              {confirmConfig.confirmText === 'delete' ? 'Delete' : confirmConfig.confirmText}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modern Prompt Dialog */}
+      <Dialog open={showPromptDialog} onOpenChange={setShowPromptDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{promptConfig.title}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">{promptConfig.message}</p>
+            <Input
+              value={promptValue}
+              onChange={(e) => setPromptValue(e.target.value)}
+              placeholder="Enter new name"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPromptDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => {
+                setShowPromptDialog(false);
+                promptConfig.onConfirm(promptValue);
+              }}
+              disabled={!promptValue.trim()}
+            >
+              Rename
             </Button>
           </DialogFooter>
         </DialogContent>
