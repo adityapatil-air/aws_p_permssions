@@ -1670,15 +1670,50 @@ export default function FileManager() {
           <div className="flex items-center space-x-4">
             <h1 className="text-2xl font-bold">ShipFile</h1>
             <div className="flex items-center space-x-1 text-sm">
-              <span className="text-blue-600 cursor-pointer" onClick={() => setCurrentPath('')}>
-                {currentBucket}
-              </span>
-              {currentPath && (
-                <>
-                  <span className="text-gray-400">/</span>
-                  <span className="text-gray-600">{currentPath}</span>
-                </>
-              )}
+              {(() => {
+                const memberData = localStorage.getItem('currentMember');
+                if (memberData) {
+                  const member = JSON.parse(memberData);
+                  if (member.scopeType === 'specific' && member.scopeFolders) {
+                    const scopeFolders = JSON.parse(member.scopeFolders);
+                    if (scopeFolders.length === 1) {
+                      // Show only the deepest folder name as root
+                      const scopeFolder = scopeFolders[0];
+                      const folderName = scopeFolder.split('/').pop();
+                      const relativePath = currentPath.replace(scopeFolder, '').replace(/^\//, '');
+                      
+                      return (
+                        <>
+                          <span className="text-blue-600 cursor-pointer" onClick={() => setCurrentPath(scopeFolder)}>
+                            {currentBucket}/{folderName}
+                          </span>
+                          {relativePath && (
+                            <>
+                              <span className="text-gray-400">/</span>
+                              <span className="text-gray-600">{relativePath}</span>
+                            </>
+                          )}
+                        </>
+                      );
+                    }
+                  }
+                }
+                
+                // Default breadcrumb for owners and members with full access
+                return (
+                  <>
+                    <span className="text-blue-600 cursor-pointer" onClick={() => setCurrentPath('')}>
+                      {currentBucket}
+                    </span>
+                    {currentPath && (
+                      <>
+                        <span className="text-gray-400">/</span>
+                        <span className="text-gray-600">{currentPath}</span>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
           <div className="flex items-center space-x-2">
