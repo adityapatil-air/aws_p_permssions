@@ -166,6 +166,8 @@ export default function FileManager() {
   });
   const [editScopeType, setEditScopeType] = useState('entire');
   const [editSelectedFolders, setEditSelectedFolders] = useState([]);
+  const [showLogs, setShowLogs] = useState(false);
+  const [activityLogs, setActivityLogs] = useState([]);
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
@@ -306,6 +308,18 @@ export default function FileManager() {
         console.log('Tracking ownership for S3 key:', s3Key);
         console.log('Current path during ownership tracking:', currentPath);
         
+        // Get the actual user email (owner or member)
+        let uploaderEmail = currentUser?.email;
+        if (!uploaderEmail) {
+          const memberData = localStorage.getItem('currentMember');
+          const ownerData = localStorage.getItem('currentOwner');
+          if (memberData) {
+            uploaderEmail = JSON.parse(memberData).email;
+          } else if (ownerData) {
+            uploaderEmail = JSON.parse(ownerData).email;
+          }
+        }
+        
         await fetch('http://localhost:3001/api/files/ownership', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -313,7 +327,7 @@ export default function FileManager() {
             bucketName: currentBucket,
             fileName: file.name,
             filePath: s3Key,
-            ownerEmail: currentUser?.email
+            ownerEmail: uploaderEmail
           })
         });
 
@@ -398,8 +412,19 @@ export default function FileManager() {
       console.log('Raw data:', data);
       console.log('Files count:', data.length);
       
+      // Get bucket info to check ownership
+      let bucket = null;
+      try {
+        const bucketResponse = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/info?userEmail=${encodeURIComponent(userEmail)}`);
+        if (bucketResponse.ok) {
+          bucket = await bucketResponse.json();
+        }
+      } catch (error) {
+        console.log('Could not fetch bucket info:', error);
+      }
+      
       // Filter files based on current permissions (fetch fresh from database)
-      if (currentUser?.role !== 'owner' && userEmail) {
+      if (currentUser?.role !== 'owner' && userEmail && bucket && bucket.owner_email !== userEmail) {
         // Get fresh member permissions from database
         const memberResponse = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(userEmail)}/permissions?bucketName=${currentBucket}`);
         if (memberResponse.ok) {
@@ -426,11 +451,39 @@ export default function FileManager() {
               
               console.log(`Checking file: ${file.name}, path: ${filePath}, owned: ${isOwned}`);
               return isOwned;
-            });
+            }).map(file => ({
+              ...file,
+              isOwned: file.type === 'folder' ? true : ownedFilePaths.has(file.id)
+            }));
           } else {
-            console.log('User can view all files - no filtering needed');
+            console.log('User can view all files - adding ownership info for permission checks');
+            
+            // Even for users who can view all files, we need ownership info for rename/delete permissions
+            const ownershipResponse = await fetch(`http://localhost:3001/api/files/ownership/${currentBucket}?userEmail=${encodeURIComponent(userEmail)}`);
+            const ownedFiles = await ownershipResponse.json();
+            const ownedFilePaths = new Set(ownedFiles.map(f => f.file_path));
+            
+            // Add ownership info to each file
+            data = data.map(file => ({
+              ...file,
+              isOwned: file.type === 'folder' ? true : ownedFilePaths.has(file.id)
+            }));
+            
+            console.log('=== OWNERSHIP DEBUG ===');
+            console.log('User email:', userEmail);
+            console.log('Owned file paths:', Array.from(ownedFilePaths));
+            console.log('Files with ownership info:', data.map(f => ({name: f.name, id: f.id, isOwned: f.isOwned})));
+            console.log('Raw ownership response:', ownedFiles);
           }
         }
+      }
+      
+      // For owners, mark all files as owned
+      if (currentUser?.role === 'owner' || !userEmail || (bucket && bucket.owner_email === userEmail)) {
+        data = data.map(file => ({
+          ...file,
+          isOwned: true
+        }));
       }
       
       setFiles(data);
@@ -761,35 +814,55 @@ export default function FileManager() {
 
   const hasPermission = (action, file = null) => {
     if (currentUser?.role === 'owner') return true;
-    if (!userPermissions) return false;
+    
+    // Get fresh permissions from localStorage instead of cached userPermissions
+    const memberData = localStorage.getItem('currentMember');
+    if (!memberData) return false;
+    
+    const member = JSON.parse(memberData);
+    const freshPermissions = JSON.parse(member.permissions || '{}');
+    
+    console.log(`Permission check for ${action} on file ${file?.name || 'bulk'}: permissions=`, freshPermissions, 'isOwned=', file?.isOwned);
     
     switch (action) {
       case 'upload':
-        return userPermissions.uploadOnly || userPermissions.uploadViewOwn || userPermissions.uploadViewAll;
+        return freshPermissions.uploadOnly || freshPermissions.uploadViewOwn || freshPermissions.uploadViewAll;
       case 'download':
-        return userPermissions.viewDownload || userPermissions.uploadViewAll;
+        return freshPermissions.viewDownload || freshPermissions.uploadViewAll;
       case 'delete':
-        return userPermissions.deleteFiles || userPermissions.deleteOwnFiles || userPermissions.uploadViewAll || userPermissions.uploadViewOwn;
+        if (freshPermissions.deleteFiles || freshPermissions.uploadViewAll) {
+          return true; // Can delete all files
+        }
+        if (freshPermissions.deleteOwnFiles || freshPermissions.uploadViewOwn) {
+          // Can only delete own files - check ownership
+          if (!file) return true; // Allow if no specific file (bulk operations)
+          console.log(`Delete permission check for ${file.name}: isOwned=${file.isOwned}`);
+          return file.isOwned === true;
+        }
+        return false;
       case 'share':
-        return userPermissions.generateLinks;
+        return freshPermissions.generateLinks;
       case 'createFolder':
-        return userPermissions.createFolder;
+        return freshPermissions.createFolder;
       case 'invite':
-        return userPermissions.inviteMembers;
+        return freshPermissions.inviteMembers;
       case 'rename':
-        if (userPermissions.uploadViewAll || userPermissions.deleteFiles) {
+        if (freshPermissions.uploadViewAll || freshPermissions.deleteFiles) {
           return true; // Can rename all files
         }
-        if (userPermissions.uploadViewOwn || userPermissions.deleteOwnFiles) {
-          return true; // Can rename own files (already filtered)
+        if (freshPermissions.uploadViewOwn || freshPermissions.deleteOwnFiles) {
+          // Can only rename own files - check ownership
+          if (!file) return true; // Allow if no specific file
+          console.log(`Rename permission check for ${file.name}: isOwned=${file.isOwned}`);
+          return file.isOwned === true;
         }
         return false;
       case 'preview':
         // Check if user can view this specific file
-        if (userPermissions.uploadViewAll || userPermissions.viewDownload || userPermissions.viewOnly) {
+        if (freshPermissions.uploadViewAll || freshPermissions.viewDownload || freshPermissions.viewOnly) {
           return true; // Can view all files
         }
-        if (userPermissions.uploadViewOwn) {
+        if (freshPermissions.uploadViewOwn) {
           return true; // File ownership already filtered in loadFiles
         }
         return false;
@@ -829,8 +902,12 @@ export default function FileManager() {
   };
 
   const handleDeleteClick = () => {
-    if (!hasPermission('delete')) {
-      alert('You do not have permission to perform DELETE on this bucket. Please contact the owner for access.');
+    // Check if user has delete permission for all selected files
+    const selectedFileObjects = selectedFiles.map(fileId => files.find(f => f.id === fileId)).filter(Boolean);
+    const canDeleteAll = selectedFileObjects.every(file => hasPermission('delete', file));
+    
+    if (!canDeleteAll) {
+      alert('You do not have permission to delete some of the selected files. You can only delete files you uploaded.');
       return;
     }
     handleDelete();
@@ -943,6 +1020,11 @@ export default function FileManager() {
   };
 
   const handleRename = async (file) => {
+    if (!hasPermission('rename', file)) {
+      alert('You do not have permission to rename this file. You can only rename files you uploaded.');
+      return;
+    }
+    
     const newName = prompt(`Rename ${file.type}:`, file.name);
     if (!newName || newName === file.name) return;
 
@@ -965,7 +1047,7 @@ export default function FileManager() {
         throw new Error(error.error || 'Failed to rename');
       }
       
-      loadFiles(); // Refresh the file list
+      await loadFiles(); // Refresh the file list
       alert(`${file.type === 'folder' ? 'Folder' : 'File'} renamed successfully!`);
     } catch (error) {
       console.error('Rename failed:', error);
@@ -975,8 +1057,8 @@ export default function FileManager() {
 
   const handleDeleteSingle = async (file) => {
     console.log('Deleting file:', file.name, 'ID:', file.id);
-    if (!hasPermission('delete')) {
-      alert('You do not have permission to perform DELETE on this bucket. Please contact the owner for access.');
+    if (!hasPermission('delete', file)) {
+      alert('You do not have permission to delete this file. You can only delete files you uploaded.');
       return;
     }
 
@@ -1129,6 +1211,12 @@ export default function FileManager() {
     }
   }, [showEditPermissions, editScopeType]);
 
+  React.useEffect(() => {
+    if (showLogs) {
+      loadActivityLogs();
+    }
+  }, [showLogs]);
+
   const toggleFolderExpansion = (folderPath) => {
     const newExpanded = new Set(expandedFolders);
     if (newExpanded.has(folderPath)) {
@@ -1229,29 +1317,46 @@ export default function FileManager() {
           invite_members: false
         };
         
-        if (permissions.viewOnly || permissions.viewDownload) simplified.view = 'all';
+        // Determine view permissions
         if (permissions.uploadViewOwn) {
           simplified.view = 'own';
-          simplified.upload = 'own';
-        }
-        if (permissions.uploadViewAll) {
+        } else if (permissions.uploadViewAll || permissions.viewDownload || permissions.viewOnly) {
           simplified.view = 'all';
+        }
+        
+        // Determine upload permissions
+        if (permissions.uploadViewOwn) {
+          simplified.upload = 'own';
+        } else if (permissions.uploadViewAll) {
           simplified.upload = 'all';
         }
+        
+        // Set other permissions
         if (permissions.viewDownload) simplified.download = true;
         if (permissions.generateLinks) simplified.share = true;
         if (permissions.createFolder) simplified.create_folder = true;
         if (permissions.inviteMembers) simplified.invite_members = true;
         
-        setInvitePermissions(simplified);
-        
-        // Copy scope settings
-        if (memberData.scope_type) {
-          setScopeType(memberData.scope_type);
-          if (memberData.scope_folders) {
-            const scopeFolders = JSON.parse(memberData.scope_folders);
-            setSelectedFolders(scopeFolders);
-            setSelectedFolderPaths(new Set(scopeFolders));
+        if (showEditPermissions) {
+          setEditPermissions(simplified);
+          if (memberData.scope_type) {
+            setEditScopeType(memberData.scope_type);
+            if (memberData.scope_folders) {
+              const scopeFolders = JSON.parse(memberData.scope_folders);
+              setEditSelectedFolders(scopeFolders);
+            }
+          }
+        } else {
+          setInvitePermissions(simplified);
+          
+          // Copy scope settings
+          if (memberData.scope_type) {
+            setScopeType(memberData.scope_type);
+            if (memberData.scope_folders) {
+              const scopeFolders = JSON.parse(memberData.scope_folders);
+              setSelectedFolders(scopeFolders);
+              setSelectedFolderPaths(new Set(scopeFolders));
+            }
           }
         }
       }
@@ -1421,6 +1526,83 @@ export default function FileManager() {
     }
   };
 
+  const handleRemoveMember = async (member) => {
+    if (!confirm(`Remove ${member.email} from the organization? They will lose access to this bucket.`)) return;
+    
+    try {
+      const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(member.email)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bucketName: currentBucket
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to remove member');
+      }
+      
+      loadAllMembers(); // Refresh the members list
+      alert(`${member.email} has been removed from the organization.`);
+      
+    } catch (error) {
+      console.error('Failed to remove member:', error);
+      alert(error.message || 'Failed to remove member');
+    }
+  };
+
+  const loadActivityLogs = async () => {
+    try {
+      // Get owner email from currentUser or localStorage
+      let ownerEmail = currentUser?.email;
+      if (!ownerEmail) {
+        const ownerData = localStorage.getItem('currentOwner');
+        if (ownerData) {
+          ownerEmail = JSON.parse(ownerData).email;
+        }
+      }
+      
+      if (!ownerEmail) {
+        console.error('No owner email found');
+        return;
+      }
+      
+      const url = `http://localhost:3001/api/buckets/${currentBucket}/logs?ownerEmail=${encodeURIComponent(ownerEmail)}`;
+      const response = await fetch(url);
+      const logs = await response.json();
+      setActivityLogs(logs);
+    } catch (error) {
+      console.error('Failed to load activity logs:', error);
+    }
+  };
+
+  const formatAction = (action) => {
+    const actionMap = {
+      'upload': 'Upload',
+      'delete': 'Delete',
+      'delete_folder': 'Delete Folder',
+      'rename': 'Rename',
+      'share': 'Share Link',
+      'create_folder': 'Create Folder',
+      'permission_change': 'Permission Change'
+    };
+    return actionMap[action] || action;
+  };
+
+  const formatDetails = (action, oldName, details) => {
+    if (action === 'rename' && oldName && details) {
+      return `${oldName} → ${details}`;
+    }
+    if (action === 'share' && details) {
+      return details;
+    }
+    if (action === 'permission_change') {
+      return details || 'Permissions updated';
+    }
+    return '-';
+  };
+
   const canGrantPermission = (permissionType, permissionValue) => {
     if (currentUser?.role === 'owner') return true;
     if (!userPermissions) return false;
@@ -1512,12 +1694,22 @@ export default function FileManager() {
                 Invite Member
               </Button>
             )}
-            {(currentUser?.role === 'owner' || localStorage.getItem('currentOwner')) && (
-              <Button variant="outline" size="sm" onClick={() => setShowMembers(true)}>
-                <UserPlus className="h-4 w-4 mr-2" />
-                Members
-              </Button>
-            )}
+            {(() => {
+              const ownerData = localStorage.getItem('currentOwner');
+              const isOwner = currentUser?.role === 'owner' || !!ownerData;
+              return isOwner && (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setShowMembers(true)}>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Members
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowLogs(true)}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Logs
+                  </Button>
+                </>
+              );
+            })()}
             <Button variant="outline" size="sm" onClick={() => setShowPasswordModal(true)}>
               <Settings className="h-4 w-4" />
             </Button>
@@ -1582,7 +1774,15 @@ export default function FileManager() {
                     <Share className="h-4 w-4 mr-2" />
                     Share
                   </Button>
-                  <Button variant="destructive" size="sm" onClick={handleDeleteClick}>
+                  <Button 
+                    variant="destructive" 
+                    size="sm" 
+                    onClick={handleDeleteClick}
+                    disabled={!selectedFiles.every(fileId => {
+                      const file = files.find(f => f.id === fileId);
+                      return file && hasPermission('delete', file);
+                    })}
+                  >
                     <Trash2 className="h-4 w-4 mr-2" />
                     Delete
                   </Button>
@@ -1660,8 +1860,10 @@ export default function FileManager() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredFiles.map((file) => (
-                      <TableRow key={file.id}>
+                    {filteredFiles.map((file) => {
+                      console.log(`Rendering file ${file.name}: isOwned=${file.isOwned}, hasRenamePermission=${hasPermission('rename', file)}`);
+                      return (
+                        <TableRow key={file.id}>
                         <TableCell>
                           <input
                             type="checkbox"
@@ -1723,7 +1925,7 @@ export default function FileManager() {
                               variant="ghost" 
                               size="sm" 
                               onClick={() => handleRename(file)}
-                              disabled={!hasPermission('rename')}
+                              disabled={!hasPermission('rename', file)}
                               title="Rename"
                             >
                               <Edit className="h-4 w-4" />
@@ -1735,15 +1937,16 @@ export default function FileManager() {
                                 console.log('Single delete clicked for:', file.name);
                                 handleDeleteSingle(file);
                               }}
-                              disabled={!hasPermission('delete')}
+                              disabled={!hasPermission('delete', file)}
                               title="Delete"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </TableCell>
-                      </TableRow>
-                    ))}
+                        </TableRow>
+                      );
+                    })}
                     {filteredFiles.length === 0 && !isLoadingAllFiles && (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center text-gray-500 py-8">
@@ -2326,6 +2529,18 @@ export default function FileManager() {
             <DialogTitle>Edit Member Permissions - {editingMember?.email}</DialogTitle>
           </DialogHeader>
           <div className="space-y-6">
+            <div className="space-y-2">
+              <Label className="text-base font-medium">Permissions</Label>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleShowCopyPermissions}
+                className="w-full"
+              >
+                Copy Permissions from Existing Member
+              </Button>
+            </div>
+            
             {/* Same permission structure as invite modal */}
             <div className="grid grid-cols-2 gap-6">
               <div>
@@ -2514,8 +2729,68 @@ export default function FileManager() {
             <Button variant="outline" onClick={() => setShowEditPermissions(false)}>
               Cancel
             </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => handleRemoveMember(editingMember)}
+            >
+              Remove Member
+            </Button>
             <Button onClick={handleUpdateMemberPermissions}>
               Update Permissions
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Activity Logs Modal */}
+      <Dialog open={showLogs} onOpenChange={setShowLogs}>
+        <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Activity Logs</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {activityLogs.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Timestamp</TableHead>
+                    <TableHead>User</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Resource</TableHead>
+                    <TableHead>Details</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {activityLogs.map((log, index) => (
+                    <TableRow key={index}>
+                      <TableCell className="text-sm">
+                        {new Date(log.timestamp).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-sm font-medium">
+                        {log.user_email}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {formatAction(log.action)}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {log.resource_path}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {formatDetails(log.action, log.old_name, log.details)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No activity logs found.</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLogs(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

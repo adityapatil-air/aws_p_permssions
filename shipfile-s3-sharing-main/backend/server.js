@@ -86,6 +86,18 @@ db.serialize(() => {
     UNIQUE(bucket_name, file_path)
   )`);
   
+  // Create activity logs table
+  db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bucket_name TEXT NOT NULL,
+    user_email TEXT NOT NULL,
+    action TEXT NOT NULL,
+    resource_path TEXT NOT NULL,
+    old_name TEXT,
+    details TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  
   // Add missing columns to existing tables
   db.run(`ALTER TABLE members ADD COLUMN invited_by TEXT`, (err) => {
     if (err && !err.message.includes('duplicate column')) {
@@ -109,6 +121,21 @@ const transporter = nodemailer.createTransport({
     pass: process.env.SMTP_PASS
   }
 });
+
+// Helper function to log activities
+const logActivity = (bucketName, userEmail, action, resourcePath, oldName = null, details = null) => {
+  db.run(
+    'INSERT INTO activity_logs (bucket_name, user_email, action, resource_path, old_name, details) VALUES (?, ?, ?, ?, ?, ?)',
+    [bucketName, userEmail, action, resourcePath, oldName, details],
+    function(err) {
+      if (err) {
+        console.error('Error logging activity:', err);
+      } else {
+        console.log(`Activity logged: ${userEmail} ${action} ${resourcePath}`);
+      }
+    }
+  );
+};
 
 // Helper function to check if user has access to specific files/folders
 const checkFolderAccess = (userEmail, bucketName, items) => {
@@ -368,6 +395,18 @@ app.post('/api/buckets', async (req, res) => {
   }
 });
 
+// Get bucket info
+app.get('/api/buckets/:bucketName/info', (req, res) => {
+  const { bucketName } = req.params;
+  
+  db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
+    if (err || !bucket) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+    res.json({ owner_email: bucket.owner_email });
+  });
+});
+
 // Get buckets for owner
 app.get('/api/buckets', (req, res) => {
   const { ownerEmail } = req.query;
@@ -512,6 +551,10 @@ app.post('/api/folders', checkPermission('createFolder'), async (req, res) => {
       });
 
       await s3Client.send(command);
+      
+      // Log folder creation
+      logActivity(bucketName, userEmail, 'create_folder', folderKey);
+      
       res.json({ success: true, folderPath: folderKey });
     });
 
@@ -991,6 +1034,10 @@ app.post('/api/share', checkPermission('share'), async (req, res) => {
         });
         
         const shareUrl = await getSignedUrl(s3Client, command, { expiresIn });
+        
+        // Log share activity
+        logActivity(bucketName, userEmail, 'share', fileKey, null, `${shareType} - ${expiryHours}h`);
+        
         res.json({ shareUrl });
       } else {
         const shareId = Math.random().toString(36).substring(2, 15);
@@ -1010,6 +1057,11 @@ app.post('/api/share', checkPermission('share'), async (req, res) => {
             const shareUrl = isSingleFolder 
               ? `http://localhost:8080/shared-folder/${shareId}`
               : `http://localhost:3001/api/share/${shareId}/download`;
+            
+            // Log share activity for multiple items
+            const resourcePath = items.length === 1 ? items[0].key : `${items.length} items`;
+            logActivity(bucketName, userEmail, 'share', resourcePath, null, `${shareType} - ${expiryHours}h`);
+            
             res.json({ shareUrl });
           }
         );
@@ -1029,6 +1081,55 @@ app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
   console.log('Bucket:', bucketName);
   console.log('Items to delete:', items);
   console.log('User email:', userEmail);
+
+  // Check ownership for non-owners with limited permissions
+  const bucket = await new Promise((resolve, reject) => {
+    db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+
+  if (bucket && bucket.owner_email !== userEmail) {
+    const member = await new Promise((resolve, reject) => {
+      db.get('SELECT permissions FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (member) {
+      const permissions = JSON.parse(member.permissions);
+      console.log('Delete permissions check:', permissions);
+
+      // If user can only delete own files, check ownership
+      if (!permissions.deleteFiles && !permissions.uploadViewAll && (permissions.deleteOwnFiles || permissions.uploadViewOwn)) {
+        console.log('Checking ownership for delete operation...');
+        for (const item of items) {
+          const ownership = await new Promise((resolve, reject) => {
+            db.get('SELECT owner_email FROM file_ownership WHERE bucket_name = ? AND file_path = ?', [bucketName, item], (err, row) => {
+              if (err) reject(err);
+              else resolve(row);
+            });
+          });
+
+          console.log(`Ownership check for ${item}:`, ownership);
+          console.log(`User email: ${userEmail}`);
+          
+          if (!ownership) {
+            console.log(`No ownership record found for: ${item}`);
+            return res.status(403).json({ error: `You can only delete files you uploaded. Cannot delete: ${item} (no ownership record)` });
+          }
+          
+          if (ownership.owner_email !== userEmail) {
+            console.log(`Ownership mismatch: ${ownership.owner_email} vs ${userEmail}`);
+            return res.status(403).json({ error: `You can only delete files you uploaded. Cannot delete: ${item}` });
+          }
+        }
+        console.log('All ownership checks passed');
+      }
+    }
+  }
 
   try {
     db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], async (err, row) => {
@@ -1051,10 +1152,9 @@ app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
       for (const item of items) {
         console.log('Processing item:', item);
         
-        if (item.endsWith('/') || item.includes('/')) {
-          console.log('Item is folder or has path, checking for contents...');
-          const prefix = item.endsWith('/') ? item : item + '/';
-          const listCommand = new ListObjectsV2Command({ Bucket: bucketName, Prefix: prefix });
+        if (item.endsWith('/')) {
+          console.log('Item is folder, checking for contents...');
+          const listCommand = new ListObjectsV2Command({ Bucket: bucketName, Prefix: item });
           const listResponse = await s3Client.send(listCommand);
           
           if (listResponse.Contents) {
@@ -1093,6 +1193,10 @@ app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
             if (err) console.error('Error cleaning up ownership record:', err);
             else console.log('Cleaned up ownership record for:', key);
           });
+          
+          // Log delete activity
+          const action = key.endsWith('/') ? 'delete_folder' : 'delete';
+          logActivity(bucketName, userEmail, action, key);
         }
       }
       
@@ -1601,6 +1705,11 @@ app.get('/api/shared-folder/:shareId/download/*', async (req, res) => {
 app.post('/api/rename', async (req, res) => {
   const { bucketName, oldKey, newName, type, currentPath, userEmail } = req.body;
 
+  console.log('=== RENAME REQUEST ===');
+  console.log('User:', userEmail);
+  console.log('File:', oldKey);
+  console.log('New name:', newName);
+
   try {
     const bucket = await new Promise((resolve, reject) => {
       db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
@@ -1611,6 +1720,44 @@ app.post('/api/rename', async (req, res) => {
 
     if (!bucket) {
       return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    // Check permissions if not owner
+    if (bucket.owner_email !== userEmail) {
+      const member = await new Promise((resolve, reject) => {
+        db.get('SELECT permissions FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
+        });
+      });
+
+      if (!member) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const permissions = JSON.parse(member.permissions);
+      console.log('Member permissions:', permissions);
+
+      // Check if user has rename permissions
+      if (!permissions.uploadViewAll && !permissions.deleteFiles) {
+        // User can only rename own files - check ownership
+        if (permissions.uploadViewOwn || permissions.deleteOwnFiles) {
+          const ownership = await new Promise((resolve, reject) => {
+            db.get('SELECT owner_email FROM file_ownership WHERE bucket_name = ? AND file_path = ?', [bucketName, oldKey], (err, row) => {
+              if (err) reject(err);
+              else resolve(row);
+            });
+          });
+
+          console.log('File ownership check:', ownership);
+          
+          if (!ownership || ownership.owner_email !== userEmail) {
+            return res.status(403).json({ error: 'You can only rename files you uploaded' });
+          }
+        } else {
+          return res.status(403).json({ error: 'You do not have permission to rename files' });
+        }
+      }
     }
 
     const s3Client = new S3Client({
@@ -1681,6 +1828,29 @@ app.post('/api/rename', async (req, res) => {
       await s3Client.send(deleteCommand);
     }
 
+    // Update ownership record for renamed file
+    if (type === 'file') {
+      const fileExtension = oldKey.split('.').pop();
+      const newKey = currentPath ? `${currentPath}/${newName}` : newName;
+      const finalNewKey = newName.includes('.') ? newKey : `${newKey}.${fileExtension}`;
+      
+      db.run('UPDATE file_ownership SET file_path = ? WHERE bucket_name = ? AND file_path = ?', 
+        [finalNewKey, bucketName, oldKey], (err) => {
+        if (err) console.error('Error updating ownership record:', err);
+        else console.log('Updated ownership record:', oldKey, '->', finalNewKey);
+      });
+    }
+    
+    // Log rename activity
+    const finalNewKey = type === 'folder' ? 
+      (currentPath ? `${currentPath}/${newName}/` : `${newName}/`) :
+      (currentPath ? `${currentPath}/${newName}` : newName);
+    
+    const oldFileName = oldKey.split('/').pop();
+    const newFileName = type === 'folder' ? newName : (newName.includes('.') ? newName : `${newName}.${oldFileName.split('.').pop()}`);
+    
+    logActivity(bucketName, userEmail, 'rename', finalNewKey, oldFileName, newFileName);
+    
     res.json({ success: true, message: 'Renamed successfully' });
 
   } catch (error) {
@@ -1974,6 +2144,10 @@ app.post('/api/files/ownership', async (req, res) => {
           return res.status(500).json({ error: 'Failed to track ownership' });
         }
         console.log('✅ File ownership tracked successfully');
+        
+        // Log the upload activity
+        logActivity(bucketName, ownerEmail, 'upload', filePath);
+        
         res.json({ success: true });
       }
     );
@@ -2092,12 +2266,91 @@ app.put('/api/members/:email/permissions', async (req, res) => {
         }
         
         console.log('Member permissions updated successfully');
+        
+        // Log permission change activity
+        logActivity(bucketName, 'owner', 'permission_change', email, null, 'Permissions updated');
+        
         res.json({ success: true, message: 'Permissions updated successfully' });
       }
     );
   } catch (error) {
     console.error('Error updating member permissions:', error);
     res.status(500).json({ error: 'Failed to update permissions' });
+  }
+});
+
+// Get activity logs (owner only)
+app.get('/api/buckets/:bucketName/logs', async (req, res) => {
+  const { bucketName } = req.params;
+  const { ownerEmail } = req.query;
+
+  console.log('=== ACTIVITY LOGS REQUEST ===');
+  console.log('Bucket Name:', bucketName);
+  console.log('Owner Email:', ownerEmail);
+
+  try {
+    // Verify the requester is the bucket owner
+    db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
+      if (err || !bucket) {
+        console.log('Bucket not found or error:', err);
+        return res.status(404).json({ error: 'Bucket not found' });
+      }
+      
+      if (bucket.owner_email !== ownerEmail) {
+        console.log('Owner email mismatch!');
+        return res.status(403).json({ error: 'Only bucket owner can view activity logs' });
+      }
+      
+      // Get activity logs for this bucket (most recent first)
+      db.all(
+        'SELECT user_email, action, resource_path, old_name, details, timestamp FROM activity_logs WHERE bucket_name = ? ORDER BY timestamp DESC LIMIT 100',
+        [bucketName],
+        (err, logs) => {
+          if (err) {
+            console.error('Database error:', err);
+            return res.status(500).json({ error: 'Database error' });
+          }
+          console.log('Activity logs found:', logs.length);
+          res.json(logs || []);
+        }
+      );
+    });
+  } catch (error) {
+    console.error('Failed to load activity logs:', error);
+    res.status(500).json({ error: 'Failed to load logs' });
+  }
+});
+
+// Remove member from organization
+app.delete('/api/members/:email', async (req, res) => {
+  const { email } = req.params;
+  const { bucketName } = req.body;
+  
+  try {
+    db.run(
+      'DELETE FROM members WHERE email = ? AND bucket_name = ?',
+      [email, bucketName],
+      function(err) {
+        if (err) {
+          console.error('Database error removing member:', err);
+          return res.status(500).json({ error: 'Failed to remove member' });
+        }
+        
+        if (this.changes === 0) {
+          return res.status(404).json({ error: 'Member not found' });
+        }
+        
+        console.log('Member removed successfully:', email);
+        
+        // Log member removal activity
+        logActivity(bucketName, 'owner', 'member_removed', email, null, 'Member removed from organization');
+        
+        res.json({ success: true, message: 'Member removed successfully' });
+      }
+    );
+  } catch (error) {
+    console.error('Error removing member:', error);
+    res.status(500).json({ error: 'Failed to remove member' });
   }
 });
 
