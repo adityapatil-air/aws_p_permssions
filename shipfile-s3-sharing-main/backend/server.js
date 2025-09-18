@@ -1861,6 +1861,47 @@ app.get('/api/buckets/:bucketName/folders/tree', async (req, res) => {
   }
 });
 
+// Get all members for owner view
+app.get('/api/buckets/:bucketName/all-members', async (req, res) => {
+  const { bucketName } = req.params;
+  const { ownerEmail } = req.query;
+
+  console.log('=== ALL MEMBERS REQUEST ===');
+  console.log('Bucket Name:', bucketName);
+  console.log('Owner Email:', ownerEmail);
+
+  try {
+    // Verify the requester is the bucket owner
+    db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
+      if (err || !bucket) {
+        console.log('Bucket not found or error:', err);
+        return res.status(404).json({ error: 'Bucket not found' });
+      }
+      
+      console.log('Bucket owner email:', bucket.owner_email);
+      console.log('Requested by email:', ownerEmail);
+      
+      if (bucket.owner_email !== ownerEmail) {
+        console.log('Owner email mismatch!');
+        return res.status(403).json({ error: 'Only bucket owner can view all members' });
+      }
+      
+      // Get all members for this bucket
+      db.all('SELECT email, permissions, scope_type, scope_folders, invited_by FROM members WHERE bucket_name = ?', [bucketName], (err, members) => {
+        if (err) {
+          console.error('Database error:', err);
+          return res.status(500).json({ error: 'Database error' });
+        }
+        console.log('Members found:', members);
+        res.json(members || []);
+      });
+    });
+  } catch (error) {
+    console.error('Failed to load all members:', error);
+    res.status(500).json({ error: 'Failed to load members' });
+  }
+});
+
 // Get members for permission copying
 app.get('/api/buckets/:bucketName/members', async (req, res) => {
   const { bucketName } = req.params;
@@ -2022,6 +2063,41 @@ app.post('/api/member/change-password', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Password change failed' });
+  }
+});
+
+// Update member permissions (owner only)
+app.put('/api/members/:email/permissions', async (req, res) => {
+  const { email } = req.params;
+  const { bucketName, permissions, scopeType, scopeFolders } = req.body;
+  
+  console.log('=== UPDATE MEMBER PERMISSIONS ===');
+  console.log('Member email:', email);
+  console.log('Bucket:', bucketName);
+  console.log('New permissions:', permissions);
+  console.log('New scope:', scopeType, scopeFolders);
+  
+  try {
+    db.run(
+      'UPDATE members SET permissions = ?, scope_type = ?, scope_folders = ? WHERE email = ? AND bucket_name = ?',
+      [JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders), email, bucketName],
+      function(err) {
+        if (err) {
+          console.error('Database error updating member:', err);
+          return res.status(500).json({ error: 'Failed to update member permissions' });
+        }
+        
+        if (this.changes === 0) {
+          return res.status(404).json({ error: 'Member not found' });
+        }
+        
+        console.log('Member permissions updated successfully');
+        res.json({ success: true, message: 'Permissions updated successfully' });
+      }
+    );
+  } catch (error) {
+    console.error('Error updating member permissions:', error);
+    res.status(500).json({ error: 'Failed to update permissions' });
   }
 });
 
