@@ -1061,9 +1061,7 @@ app.post('/api/share', checkPermission('share'), async (req, res) => {
               return res.status(500).json({ error: 'Database error' });
             }
             
-            const shareUrl = isSingleFolder 
-              ? `http://localhost:8080/shared-folder/${shareId}`
-              : `http://localhost:3001/api/share/${shareId}/download`;
+            const shareUrl = `http://localhost:3001/api/share/${shareId}`;
             
             // Log share activity for multiple items
             const resourcePath = items.length === 1 ? items[0].key : `${items.length} items`;
@@ -1550,8 +1548,8 @@ app.post('/api/member/login', async (req, res) => {
   }
 });
 
-// Get shared folder contents
-app.get('/api/shared-folder/:shareId', async (req, res) => {
+// Get shared content (files and folders)
+app.get('/api/shared/:shareId', async (req, res) => {
   const { shareId } = req.params;
   const { path = '' } = req.query;
   
@@ -1573,13 +1571,6 @@ app.get('/api/shared-folder/:shareId', async (req, res) => {
       return res.status(410).json({ error: 'Share has expired' });
     }
     
-    const items = JSON.parse(share.items);
-    const folder = items[0];
-    
-    if (!folder || folder.type !== 'folder') {
-      return res.status(400).json({ error: 'Invalid folder share' });
-    }
-    
     // Get bucket info
     const bucket = await new Promise((resolve, reject) => {
       db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
@@ -1592,7 +1583,6 @@ app.get('/api/shared-folder/:shareId', async (req, res) => {
       return res.status(404).json({ error: 'Bucket not found' });
     }
     
-    // List folder contents
     const s3Client = new S3Client({
       region: bucket.region,
       credentials: {
@@ -1601,55 +1591,52 @@ app.get('/api/shared-folder/:shareId', async (req, res) => {
       },
     });
     
-    const folderPath = path ? `${folder.key}${path}/` : folder.key;
-    const command = new ListObjectsV2Command({
-      Bucket: share.bucket_name,
-      Prefix: folderPath,
-      Delimiter: '/'
-    });
+    const sharedItems = JSON.parse(share.items);
+    let allFiles = [];
     
-    const response = await s3Client.send(command);
-    const contents = [];
+    console.log('Processing shared items:', sharedItems);
     
-    // Add folders
-    if (response.CommonPrefixes) {
-      response.CommonPrefixes.forEach(prefixObj => {
-        const name = prefixObj.Prefix.replace(folderPath, '').replace('/', '');
-        if (name) {
-          contents.push({
-            name,
-            type: 'folder',
-            key: prefixObj.Prefix,
-            modified: new Date().toISOString().split('T')[0]
+    for (const item of sharedItems) {
+      if (item.type === 'folder') {
+        const folderKey = item.key.endsWith('/') ? item.key : item.key + '/';
+        const listCommand = new ListObjectsV2Command({ Bucket: share.bucket_name, Prefix: folderKey });
+        const listResponse = await s3Client.send(listCommand);
+        
+        if (listResponse.Contents) {
+          listResponse.Contents.forEach(obj => {
+            if (!obj.Key.endsWith('/')) {
+              allFiles.push({
+                name: obj.Key.split('/').pop(),
+                key: obj.Key,
+                type: 'file',
+                size: `${(obj.Size / 1024 / 1024).toFixed(2)} MB`,
+                modified: obj.LastModified.toISOString().split('T')[0],
+                fileType: obj.Key.split('.').pop(),
+                folderPath: obj.Key.includes('/') ? obj.Key.substring(0, obj.Key.lastIndexOf('/')) : ''
+              });
+            }
           });
         }
-      });
-    }
-    
-    // Add files
-    if (response.Contents) {
-      response.Contents.forEach(obj => {
-        if (!obj.Key.endsWith('/')) {
-          const name = obj.Key.replace(folderPath, '');
-          if (name && !name.includes('/')) {
-            contents.push({
-              name,
-              type: 'file',
-              key: obj.Key,
-              size: `${(obj.Size / 1024 / 1024).toFixed(2)} MB`,
-              modified: obj.LastModified.toISOString().split('T')[0],
-              fileType: name.split('.').pop()
-            });
-          }
-        }
-      });
+      } else {
+        // Add individual files
+        allFiles.push({
+          name: item.name,
+          key: item.key,
+          type: 'file',
+          size: 'N/A',
+          modified: 'N/A',
+          fileType: item.name.split('.').pop(),
+          folderPath: item.key.includes('/') ? item.key.substring(0, item.key.lastIndexOf('/')) : ''
+        });
+      }
     }
     
     res.json({
-      folderName: folder.name,
-      currentPath: path,
-      contents,
-      expiresAt: share.expires_at
+      shareId: shareId,
+      bucketName: share.bucket_name,
+      files: allFiles,
+      expiresAt: share.expires_at,
+      sharedItems: sharedItems
     });
     
   } catch (error) {
@@ -1658,10 +1645,57 @@ app.get('/api/shared-folder/:shareId', async (req, res) => {
   }
 });
 
-// Download file from shared folder
-app.get('/api/shared-folder/:shareId/download/*', async (req, res) => {
-  const { shareId } = req.params;
-  const fileKey = req.params[0];
+// Preview file from shared content
+app.get('/api/shared/:shareId/preview/:fileKey(*)', async (req, res) => {
+  const { shareId, fileKey } = req.params;
+  
+  try {
+    const share = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM shares WHERE id = ? AND revoked = 0', [shareId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    if (!share || new Date(share.expires_at) < new Date()) {
+      return res.status(404).send('Share not found or expired');
+    }
+    
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+    
+    const decodedFileKey = decodeURIComponent(fileKey);
+    const command = new GetObjectCommand({ Bucket: share.bucket_name, Key: decodedFileKey });
+    const response = await s3Client.send(command);
+    
+    const contentType = response.ContentType || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    
+    response.Body.pipe(res);
+    
+  } catch (error) {
+    console.error('Preview error:', error);
+    res.status(500).send('Preview failed');
+  }
+});
+
+// Download file from shared content
+app.get('/api/shared/:shareId/download/:fileKey(*)', async (req, res) => {
+  const { shareId, fileKey } = req.params;
   
   console.log('Shared folder download:', shareId, 'fileKey:', fileKey);
   
@@ -2528,6 +2562,165 @@ app.get('/api/debug/member/:email', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get member info' });
+  }
+});
+
+// Access shared content
+app.get('/api/share/:shareId', async (req, res) => {
+  const { shareId } = req.params;
+  
+  try {
+    const share = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM shares WHERE id = ? AND revoked = 0', [shareId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    if (!share) {
+      return res.status(404).send(`
+        <html><body>
+          <h2>Share Not Found</h2>
+          <p>This share link is invalid or has been revoked.</p>
+        </body></html>
+      `);
+    }
+    
+    if (new Date(share.expires_at) < new Date()) {
+      return res.status(410).send(`
+        <html><body>
+          <h2>Share Expired</h2>
+          <p>This share link has expired.</p>
+        </body></html>
+      `);
+    }
+    
+    const items = JSON.parse(share.items);
+    
+    // If single file, redirect to download
+    if (items.length === 1 && items[0].type === 'file') {
+      return res.redirect(`/api/share/${shareId}/download/${encodeURIComponent(items[0].key)}`);
+    }
+    
+    // For multiple items or folders, redirect to React share viewer
+    return res.redirect(`http://localhost:8080/shared/${shareId}`);
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    if (!bucket) {
+      return res.status(404).send('Bucket not found');
+    }
+    
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+    
+    let fileList = [];
+    
+    for (const item of items) {
+      if (item.type === 'folder') {
+        const folderKey = item.key.endsWith('/') ? item.key : item.key + '/';
+        const listCommand = new ListObjectsV2Command({ Bucket: share.bucket_name, Prefix: folderKey });
+        const listResponse = await s3Client.send(listCommand);
+        
+        if (listResponse.Contents) {
+          listResponse.Contents.forEach(obj => {
+            if (!obj.Key.endsWith('/')) {
+              fileList.push({
+                name: obj.Key.split('/').pop(),
+                key: obj.Key,
+                size: `${(obj.Size / 1024 / 1024).toFixed(2)} MB`,
+                modified: obj.LastModified.toISOString().split('T')[0],
+                folderPath: obj.Key.includes('/') ? obj.Key.substring(0, obj.Key.lastIndexOf('/')) : ''
+              });
+            }
+          });
+        }
+      } else {
+        // For individual files, get their actual S3 metadata
+        try {
+          const headCommand = new GetObjectCommand({ Bucket: share.bucket_name, Key: item.key });
+          const headResponse = await s3Client.send(headCommand);
+          fileList.push({
+            name: item.name,
+            key: item.key,
+            size: headResponse.ContentLength ? `${(headResponse.ContentLength / 1024 / 1024).toFixed(2)} MB` : 'N/A',
+            modified: headResponse.LastModified ? headResponse.LastModified.toISOString().split('T')[0] : 'N/A',
+            folderPath: item.key.includes('/') ? item.key.substring(0, item.key.lastIndexOf('/')) : ''
+          });
+        } catch (error) {
+          // If head request fails, add with basic info
+          fileList.push({
+            name: item.name,
+            key: item.key,
+            size: 'N/A',
+            modified: 'N/A',
+            folderPath: item.key.includes('/') ? item.key.substring(0, item.key.lastIndexOf('/')) : ''
+          });
+        }
+      }
+    }
+    
+    // This code is now unused as we redirect to React component
+    
+  } catch (error) {
+    console.error('Share access error:', error);
+    res.status(500).send('Failed to access shared content');
+  }
+});
+
+// Download file from share
+app.get('/api/share/:shareId/download/:fileKey(*)', async (req, res) => {
+  const { shareId, fileKey } = req.params;
+  
+  try {
+    const share = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM shares WHERE id = ? AND revoked = 0', [shareId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    if (!share || new Date(share.expires_at) < new Date()) {
+      return res.status(404).send('Share not found or expired');
+    }
+    
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+    
+    const decodedFileKey = decodeURIComponent(fileKey);
+    const command = new GetObjectCommand({ Bucket: share.bucket_name, Key: decodedFileKey });
+    const response = await s3Client.send(command);
+    
+    const fileName = decodedFileKey.split('/').pop();
+    res.setHeader('Content-Type', response.ContentType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    
+    response.Body.pipe(res);
+    
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).send('Download failed');
   }
 });
 

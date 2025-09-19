@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
-  Download, Folder, File, Image, FileText, Archive, Music, Video, ArrowLeft
+  Download, Folder, File, Image, FileText, Archive, Music, Video, ArrowLeft, Eye
 } from "lucide-react";
+import { toast } from "@/components/ui/use-toast";
 
 interface FileItem {
   name: string;
@@ -14,6 +15,7 @@ interface FileItem {
   size?: string;
   modified: string;
   fileType?: string;
+  folderPath?: string;
 }
 
 const getFileIcon = (type: string, fileType?: string) => {
@@ -22,14 +24,18 @@ const getFileIcon = (type: string, fileType?: string) => {
   switch (fileType?.toLowerCase()) {
     case 'jpg': case 'jpeg': case 'png': case 'gif':
       return <Image className="h-4 w-4 text-green-500" />;
-    case 'pdf': case 'doc': case 'docx': case 'txt':
+    case 'pdf':
       return <FileText className="h-4 w-4 text-red-500" />;
+    case 'doc': case 'docx': case 'txt':
+      return <FileText className="h-4 w-4 text-blue-500" />;
+    case 'ppt': case 'pptx':
+      return <FileText className="h-4 w-4 text-orange-500" />;
     case 'zip': case 'rar': case '7z':
       return <Archive className="h-4 w-4 text-yellow-500" />;
     case 'mp3': case 'wav': case 'flac':
       return <Music className="h-4 w-4 text-purple-500" />;
     case 'mp4': case 'avi': case 'mkv':
-      return <Video className="h-4 w-4 text-orange-500" />;
+      return <Video className="h-4 w-4 text-green-500" />;
     default:
       return <File className="h-4 w-4 text-gray-500" />;
   }
@@ -37,20 +43,20 @@ const getFileIcon = (type: string, fileType?: string) => {
 
 export default function SharedFolder() {
   const { shareId } = useParams<{ shareId: string }>();
-  const [folderData, setFolderData] = useState<any>(null);
+  const [shareData, setShareData] = useState<any>(null);
   const [currentPath, setCurrentPath] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
   console.log('SharedFolder component loaded with shareId:', shareId);
 
-  const loadFolderContents = async (path = '') => {
+  const loadSharedContent = async () => {
     try {
       setLoading(true);
       setError('');
       
-      console.log('Loading shared folder:', shareId, 'path:', path);
-      const url = `http://localhost:3001/api/shared-folder/${shareId}?path=${encodeURIComponent(path)}`;
+      console.log('Loading shared content:', shareId);
+      const url = `http://localhost:3001/api/shared/${shareId}`;
       console.log('Request URL:', url);
       
       const response = await fetch(url);
@@ -60,14 +66,13 @@ export default function SharedFolder() {
       console.log('Response data:', data);
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to load folder');
+        throw new Error(data.error || 'Failed to load shared content');
       }
 
-      setFolderData(data);
-      setCurrentPath(path);
+      setShareData(data);
     } catch (error) {
-      console.error('SharedFolder error:', error);
-      setError(error instanceof Error ? error.message : 'Failed to load folder');
+      console.error('SharedContent error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load shared content');
     } finally {
       setLoading(false);
     }
@@ -76,28 +81,38 @@ export default function SharedFolder() {
   useEffect(() => {
     console.log('SharedFolder mounted with shareId:', shareId);
     if (shareId) {
-      loadFolderContents();
+      loadSharedContent();
     } else {
       setError('Invalid share link');
       setLoading(false);
     }
   }, [shareId]);
 
-  const handleFolderClick = (folderName: string) => {
-    const newPath = currentPath ? `${currentPath}/${folderName}` : folderName;
-    loadFolderContents(newPath);
-  };
-
-  const handleBackClick = () => {
-    const pathParts = currentPath.split('/');
-    pathParts.pop();
-    loadFolderContents(pathParts.join('/'));
-  };
+  // Show all files in a single group without exposing paths
+  const allFiles = shareData?.files || [];
 
   const handleDownload = (file: FileItem) => {
     const encodedKey = encodeURIComponent(file.key);
-    const downloadUrl = `http://localhost:3001/api/shared-folder/${shareId}/download/${encodedKey}`;
+    const downloadUrl = `http://localhost:3001/api/shared/${shareId}/download/${encodedKey}`;
     window.open(downloadUrl, '_blank');
+  };
+
+  const handlePreview = (file: FileItem) => {
+    const fileExt = file.fileType?.toLowerCase();
+    const nonPreviewableTypes = ['docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls', 'zip', 'rar', '7z', 'exe', 'msi'];
+    
+    if (nonPreviewableTypes.includes(fileExt || '')) {
+      toast({
+        title: "Preview Not Available",
+        description: `${file.name} cannot be previewed in browser. Please download to view.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const encodedKey = encodeURIComponent(file.key);
+    const previewUrl = `http://localhost:3001/api/shared/${shareId}/preview/${encodedKey}`;
+    window.open(previewUrl, '_blank');
   };
 
   if (loading) {
@@ -105,7 +120,7 @@ export default function SharedFolder() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p>Loading shared folder... ShareId: {shareId}</p>
+          <p>Loading shared content... ShareId: {shareId}</p>
           <p className="text-sm text-gray-500 mt-2">If you see this, the route is working</p>
         </div>
       </div>
@@ -130,34 +145,18 @@ export default function SharedFolder() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b px-6 py-4">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-2xl font-bold text-gray-900">Shared Folder: {folderData?.folderName}</h1>
-          <div className="flex items-center space-x-2 text-sm text-gray-600 mt-1">
-            <span>Path:</span>
-            <span className="text-blue-600">{folderData?.folderName}</span>
-            {currentPath && (
-              <>
-                <span>/</span>
-                <span>{currentPath}</span>
-              </>
-            )}
-          </div>
+          <h1 className="text-2xl font-bold text-gray-900">📁 Shared Files</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            {shareData?.files?.length || 0} files shared with you
+          </p>
           <p className="text-xs text-gray-500 mt-1">
-            Expires: {new Date(folderData?.expiresAt).toLocaleString()}
+            ⏰ Expires: {shareData?.expiresAt ? new Date(shareData.expiresAt).toLocaleString() : 'N/A'}
           </p>
         </div>
       </header>
 
       <div className="p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center mb-4">
-            {currentPath && (
-              <Button variant="outline" onClick={handleBackClick} className="mr-4">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back
-              </Button>
-            )}
-          </div>
-
+        <div className="max-w-7xl mx-auto space-y-6">
           <Card>
             <CardContent className="p-0">
               <Table>
@@ -165,50 +164,55 @@ export default function SharedFolder() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Size</TableHead>
-                    <TableHead>Modified</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {folderData?.contents?.map((item: FileItem, index: number) => (
+                  {allFiles.map((file: FileItem, index: number) => (
                     <TableRow key={index}>
                       <TableCell>
                         <div className="flex items-center space-x-2">
-                          {getFileIcon(item.type, item.fileType)}
-                          <span 
-                            className={item.type === 'folder' ? 'cursor-pointer hover:text-blue-600' : ''}
-                            onClick={() => item.type === 'folder' && handleFolderClick(item.name)}
-                          >
-                            {item.name}
-                          </span>
+                          {getFileIcon(file.type, file.fileType)}
+                          <span>{file.name}</span>
                         </div>
                       </TableCell>
-                      <TableCell>{item.size || '-'}</TableCell>
-                      <TableCell>{item.modified}</TableCell>
+                      <TableCell>{file.size || '-'}</TableCell>
                       <TableCell>
-                        {item.type === 'file' && (
+                        <div className="flex space-x-2">
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => handleDownload(item)}
+                            onClick={() => handlePreview(file)}
+                            className="hover:bg-green-50 hover:text-green-600"
+                            title="Preview"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => handleDownload(file)}
+                            className="hover:bg-blue-50 hover:text-blue-600"
+                            title="Download"
                           >
                             <Download className="h-4 w-4" />
                           </Button>
-                        )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
-                  {(!folderData?.contents || folderData.contents.length === 0) && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-gray-500 py-8">
-                        This folder is empty
-                      </TableCell>
-                    </TableRow>
-                  )}
                 </TableBody>
               </Table>
             </CardContent>
           </Card>
+          
+          {allFiles.length === 0 && (
+            <Card>
+              <CardContent className="p-8 text-center">
+                <p className="text-gray-500">No files found in this share.</p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>

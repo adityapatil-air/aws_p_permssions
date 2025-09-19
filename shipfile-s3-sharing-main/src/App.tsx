@@ -33,6 +33,7 @@ const App = () => (
           <Route path="/file-manager" element={<FileManager />} />
           <Route path="/accept-invite/:token" element={<AcceptInvite />} />
           <Route path="/shared-folder/:shareId" element={<SharedFolder />} />
+          <Route path="/shared/:shareId" element={<SharedFolder />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
