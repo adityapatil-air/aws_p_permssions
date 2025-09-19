@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation - ShipFile</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <a href="/" class="text-2xl font-bold text-blue-600">ShipFile</a>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-8">
+                    <a href="/#features" class="text-gray-700 hover:text-blue-600">Features</a>
+                    <a href="docs.html" class="text-blue-600 font-semibold">Documentation</a>
+                    <a href="about.html" class="text-gray-700 hover:text-blue-600">About</a>
+                    <a href="contact.html" class="text-gray-700 hover:text-blue-600">Contact</a>
+                    <a href="/login" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Get Started</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="flex">
+            <!-- Sidebar -->
+            <div class="w-64 bg-white rounded-lg shadow-sm p-6 sticky top-8 h-fit">
+                <h3 class="font-semibold text-gray-900 mb-4">Documentation</h3>
+                <nav class="space-y-2">
+                    <a href="#getting-started" class="block text-blue-600 font-medium">Getting Started</a>
+                    <a href="#aws-setup" class="block text-gray-700 hover:text-blue-600 ml-4">AWS Setup</a>
+                    <a href="#bucket-creation" class="block text-gray-700 hover:text-blue-600 ml-4">Bucket Creation</a>
+                    <a href="#iam-setup" class="block text-gray-700 hover:text-blue-600 ml-4">IAM Configuration</a>
+                    <a href="#cors-setup" class="block text-gray-700 hover:text-blue-600 ml-4">CORS Setup</a>
+                    <a href="#permissions" class="block text-gray-700 hover:text-blue-600">Permissions</a>
+                    <a href="#team-management" class="block text-gray-700 hover:text-blue-600">Team Management</a>
+                    <a href="#file-sharing" class="block text-gray-700 hover:text-blue-600">File Sharing</a>
+                    <a href="#troubleshooting" class="block text-gray-700 hover:text-blue-600">Troubleshooting</a>
+                </nav>
+            </div>
+
+            <!-- Main Content -->
+            <div class="flex-1 ml-8">
+                <div class="bg-white rounded-lg shadow-sm p-8">
+                    <h1 class="text-2xl font-medium text-gray-900 mb-6">ShipFile Documentation</h1>
+
+                    <!-- Getting Started -->
+                    <section id="getting-started" class="mb-12">
+                        <h2 class="text-xl font-medium text-gray-900 mb-3">Getting Started</h2>
+                        <p class="text-gray-600 mb-6">ShipFile transforms your AWS S3 bucket into a powerful file sharing platform. Follow this guide to set up your account and start sharing files securely.</p>
+                        
+                        <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-info-circle text-blue-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm text-blue-700">
+                                        <strong>Prerequisites:</strong> You need an AWS account with S3 access to use ShipFile.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- AWS Setup -->
+                    <section id="aws-setup" class="mb-12">
+                        <h2 class="text-xl font-medium text-gray-900 mb-3">AWS Setup Guide</h2>
+                        <p class="text-gray-600 mb-6">Before using ShipFile, you need to configure your AWS account properly. Follow these steps:</p>
+
+                        <h3 id="bucket-creation" class="text-lg font-medium text-gray-900 mb-2">1. Create S3 Bucket</h3>
+                        <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                            <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                                <li>Log in to your AWS Console</li>
+                                <li>Navigate to S3 service</li>
+                                <li>Click "Create bucket"</li>
+                                <li>Choose a unique bucket name (e.g., "my-company-shipfile")</li>
+                                <li>Select your preferred AWS region</li>
+                                <li>Keep default settings for now</li>
+                                <li>Click "Create bucket"</li>
+                            </ol>
+                        </div>
+
+                        <h3 id="iam-setup" class="text-lg font-medium text-gray-900 mb-2">2. IAM User & Group Setup</h3>
+                        <p class="text-gray-600 mb-4">Create a dedicated IAM user for ShipFile with appropriate permissions:</p>
+                        
+                        <h4 class="text-lg font-medium text-gray-900 mb-2">Create IAM Group</h4>
+                        <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                            <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                                <li>Go to IAM service in AWS Console</li>
+                                <li>Click "User groups" → "Create group"</li>
+                                <li>Group name: "ShipFileUsers"</li>
+                                <li>Attach the following policies:</li>
+                                <ul class="list-disc list-inside ml-4 mt-2 space-y-1">
+                                    <li><code class="bg-gray-200 px-2 py-1 rounded">AmazonS3FullAccess</code></li>
+                                </ul>
+                                <li>Click "Create group"</li>
+                            </ol>
+                        </div>
+
+                        <h4 class="text-lg font-medium text-gray-900 mb-2">Create IAM User</h4>
+                        <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                            <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                                <li>Go to "Users" → "Create user"</li>
+                                <li>Username: "shipfile-user"</li>
+                                <li>Select "Programmatic access"</li>
+                                <li>Add user to "ShipFileUsers" group</li>
+                                <li>Click "Create user"</li>
+                                <li><strong>Important:</strong> Save the Access Key ID and Secret Access Key</li>
+                            </ol>
+                        </div>
+
+                        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-exclamation-triangle text-yellow-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm text-yellow-700">
+                                        <strong>Security Note:</strong> Store your AWS credentials securely. Never share them or commit them to version control.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h3 id="cors-setup" class="text-lg font-medium text-gray-900 mb-2">3. Configure CORS</h3>
+                        <p class="text-gray-600 mb-4">Set up Cross-Origin Resource Sharing (CORS) for your S3 bucket:</p>
+                        
+                        <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                            <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                                <li>Go to your S3 bucket</li>
+                                <li>Click "Permissions" tab</li>
+                                <li>Scroll to "Cross-origin resource sharing (CORS)"</li>
+                                <li>Click "Edit" and paste the following configuration:</li>
+                            </ol>
+                        </div>
+
+                        <div class="bg-gray-900 rounded-lg p-4 mb-6 relative">
+                            <button onclick="copyToClipboard()" class="absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm transition">
+                                <i class="fas fa-copy mr-1"></i>Copy
+                            </button>
+                            <pre class="text-green-400 text-sm overflow-x-auto pr-16"><code id="cors-config">[
+    {
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+        "AllowedOrigins": ["*"],
+        "ExposeHeaders": ["ETag"],
+        "MaxAgeSeconds": 3000
+    }
+]</code></pre>
+                        </div>
+
+                        <script>
+                        function copyToClipboard() {
+                            const text = document.getElementById('cors-config').textContent;
+                            navigator.clipboard.writeText(text).then(() => {
+                                const btn = event.target.closest('button');
+                                const originalText = btn.innerHTML;
+                                btn.innerHTML = '<i class="fas fa-check mr-1"></i>Copied!';
+                                btn.classList.add('bg-green-600');
+                                setTimeout(() => {
+                                    btn.innerHTML = originalText;
+                                    btn.classList.remove('bg-green-600');
+                                }, 2000);
+                            });
+                        }
+                        </script>
+
+                        <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                            <ol start="5" class="list-decimal list-inside space-y-2 text-gray-700">
+                                <li>Click "Save changes"</li>
+                            </ol>
+                        </div>
+                    </section>
+
+                    <!-- Permissions -->
+                    <section id="permissions" class="mb-12">
+                        <h2 class="text-2xl font-bold text-gray-900 mb-4">Permission System</h2>
+                        <p class="text-gray-600 mb-6">ShipFile offers granular permission control for different user roles:</p>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                            <div class="bg-blue-50 rounded-lg p-4">
+                                <h3 class="text-lg font-semibold text-blue-900 mb-2">View Permissions</h3>
+                                <ul class="text-blue-800 space-y-1">
+                                    <li>• <strong>View Own:</strong> See only uploaded files</li>
+                                    <li>• <strong>View All:</strong> See all files in bucket</li>
+                                </ul>
+                            </div>
+                            <div class="bg-green-50 rounded-lg p-4">
+                                <h3 class="text-lg font-semibold text-green-900 mb-2">Upload Permissions</h3>
+                                <ul class="text-green-800 space-y-1">
+                                    <li>• <strong>Upload + Manage Own:</strong> Upload and manage own files</li>
+                                    <li>• <strong>Upload + Manage All:</strong> Upload and manage all files</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <h3 class="text-xl font-semibold text-gray-900 mb-3">Extra Permissions</h3>
+                        <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                            <ul class="space-y-2 text-gray-700">
+                                <li>• <strong>Download Files:</strong> Download files from the bucket</li>
+                                <li>• <strong>Generate Share Links:</strong> Create time-limited share links</li>
+                                <li>• <strong>Create Folders:</strong> Create new folders</li>
+                                <li>• <strong>Invite Members:</strong> Invite new team members</li>
+                            </ul>
+                        </div>
+                    </section>
+
+                    <!-- Team Management -->
+                    <section id="team-management" class="mb-12">
+                        <h2 class="text-2xl font-bold text-gray-900 mb-4">Team Management</h2>
+                        
+                        <h3 class="text-xl font-semibold text-gray-900 mb-3">Creating Organizations</h3>
+                        <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                            <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                                <li>After connecting your S3 bucket, click "Create Organization"</li>
+                                <li>Enter your organization name</li>
+                                <li>Click "Create Organization"</li>
+                            </ol>
+                        </div>
+
+                        <h3 class="text-xl font-semibold text-gray-900 mb-3">Inviting Members</h3>
+                        <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                            <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                                <li>Click "Invite Member" button</li>
+                                <li>Enter member's email address</li>
+                                <li>Configure permissions and access scope</li>
+                                <li>Choose between "Entire Bucket" or "Specific Folders"</li>
+                                <li>Send invitation</li>
+                            </ol>
+                        </div>
+                    </section>
+
+                    <!-- File Sharing -->
+                    <section id="file-sharing" class="mb-12">
+                        <h2 class="text-2xl font-bold text-gray-900 mb-4">File Sharing</h2>
+                        
+                        <h3 class="text-xl font-semibold text-gray-900 mb-3">Creating Share Links</h3>
+                        <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                            <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                                <li>Select files or folders to share</li>
+                                <li>Click "Share" button</li>
+                                <li>Choose expiration time (1 hour to 30 days)</li>
+                                <li>Click "Generate Link"</li>
+                                <li>Copy and share the generated URL</li>
+                            </ol>
+                        </div>
+
+                        <div class="bg-green-50 border-l-4 border-green-400 p-4 mb-6">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-check-circle text-green-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm text-green-700">
+                                        <strong>Tip:</strong> Share links automatically expire for security. Recipients don't need accounts to access shared files.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Troubleshooting -->
+                    <section id="troubleshooting" class="mb-12">
+                        <h2 class="text-2xl font-bold text-gray-900 mb-4">Troubleshooting</h2>
+                        
+                        <h3 class="text-xl font-semibold text-gray-900 mb-3">Common Issues</h3>
+                        
+                        <div class="space-y-6">
+                            <div class="border-l-4 border-red-400 bg-red-50 p-4">
+                                <h4 class="font-semibold text-red-800 mb-2">Invalid AWS Credentials</h4>
+                                <p class="text-red-700 text-sm mb-2">Error: "Invalid AWS credentials" or "Access Denied"</p>
+                                <p class="text-red-700 text-sm"><strong>Solution:</strong> Verify your Access Key ID and Secret Access Key. Ensure the IAM user has S3 permissions.</p>
+                            </div>
+
+                            <div class="border-l-4 border-yellow-400 bg-yellow-50 p-4">
+                                <h4 class="font-semibold text-yellow-800 mb-2">CORS Errors</h4>
+                                <p class="text-yellow-700 text-sm mb-2">Error: "CORS policy" or "Cross-origin request blocked"</p>
+                                <p class="text-yellow-700 text-sm"><strong>Solution:</strong> Configure CORS settings in your S3 bucket as described in the setup guide.</p>
+                            </div>
+
+                            <div class="border-l-4 border-blue-400 bg-blue-50 p-4">
+                                <h4 class="font-semibold text-blue-800 mb-2">Upload Failures</h4>
+                                <p class="text-blue-700 text-sm mb-2">Error: "Upload failed" or "Permission denied"</p>
+                                <p class="text-blue-700 text-sm"><strong>Solution:</strong> Check user permissions and ensure you're in the correct folder if you have limited access.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Support -->
+                    <section class="bg-gray-50 rounded-lg p-6">
+                        <h3 class="text-xl font-semibold text-gray-900 mb-3">Need Help?</h3>
+                        <p class="text-gray-600 mb-4">If you're still having issues, we're here to help!</p>
+                        <a href="contact.html" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition">
+                            Contact Support
+                        </a>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 text-white py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p>&copy; 2024 ShipFile. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+</html>

@@ -1904,7 +1904,7 @@ export default function FileManager() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b px-6 py-4">
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-4">
@@ -3197,6 +3197,23 @@ export default function FileManager() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Footer */}
+      <footer className="bg-white border-t mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex justify-between items-center text-sm text-gray-500">
+            <div>
+              <span>&copy; 2025 ShipFile. All rights reserved.</span>
+            </div>
+            <div className="flex space-x-6">
+              <a href="landing.html" className="hover:text-gray-700">Home</a>
+              <a href="docs.html" className="hover:text-gray-700">Documentation</a>
+              <a href="about.html" className="hover:text-gray-700">About</a>
+              <a href="contact.html" className="hover:text-gray-700">Contact</a>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -132,7 +132,7 @@ export default function OwnerBucketSetup() {
 
   if (!isVerified) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle className="text-center">Verify AWS Account</CardTitle>
@@ -197,12 +197,25 @@ export default function OwnerBucketSetup() {
             </div>
           </CardContent>
         </Card>
+        
+        {/* Footer */}
+        <footer className="mt-auto text-center">
+          <div className="text-sm text-gray-500">
+            <span>&copy; 2025 ShipFile. All rights reserved.</span>
+            <div className="flex justify-center space-x-6 mt-2">
+              <a href="landing.html" className="hover:text-gray-700">Home</a>
+              <a href="docs.html" className="hover:text-gray-700">Documentation</a>
+              <a href="about.html" className="hover:text-gray-700">About</a>
+              <a href="contact.html" className="hover:text-gray-700">Contact</a>
+            </div>
+          </div>
+        </footer>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 p-6 flex flex-col">
       <div className="max-w-6xl mx-auto space-y-6">
         {accountInfo && (
           <Card>
@@ -338,6 +351,23 @@ export default function OwnerBucketSetup() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Footer */}
+      <footer className="bg-white border-t mt-auto">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex justify-between items-center text-sm text-gray-500">
+            <div>
+              <span>&copy; 2025 ShipFile. All rights reserved.</span>
+            </div>
+            <div className="flex space-x-6">
+              <a href="landing.html" className="hover:text-gray-700">Home</a>
+              <a href="docs.html" className="hover:text-gray-700">Documentation</a>
+              <a href="about.html" className="hover:text-gray-700">About</a>
+              <a href="contact.html" className="hover:text-gray-700">Contact</a>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Us - ShipFile</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <a href="/" class="text-2xl font-bold text-blue-600">ShipFile</a>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-8">
+                    <a href="/#features" class="text-gray-700 hover:text-blue-600">Features</a>
+                    <a href="docs.html" class="text-gray-700 hover:text-blue-600">Documentation</a>
+                    <a href="about.html" class="text-gray-700 hover:text-blue-600">About</a>
+                    <a href="contact.html" class="text-blue-600 font-semibold">Contact</a>
+                    <a href="/login" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Get Started</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="bg-white py-12">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h1 class="text-2xl font-medium text-gray-900 mb-3">Get in Touch</h1>
+            <p class="text-base text-gray-600 max-w-2xl mx-auto">
+                Have questions about ShipFile? Need help with setup? Our team is here to help you succeed.
+            </p>
+        </div>
+    </section>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+            <!-- Contact Form -->
+            <div class="bg-white rounded-xl shadow-sm p-8">
+                <h2 class="text-2xl font-bold text-gray-900 mb-6">Send us a Message</h2>
+                <form class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="firstName" class="block text-sm font-medium text-gray-700 mb-2">First Name</label>
+                            <input type="text" id="firstName" name="firstName" required
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+                        <div>
+                            <label for="lastName" class="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
+                            <input type="text" id="lastName" name="lastName" required
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
+                        <input type="email" id="email" name="email" required
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    </div>
+                    
+                    <div>
+                        <label for="company" class="block text-sm font-medium text-gray-700 mb-2">Company (Optional)</label>
+                        <input type="text" id="company" name="company"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    </div>
+                    
+                    <div>
+                        <label for="subject" class="block text-sm font-medium text-gray-700 mb-2">Subject</label>
+                        <select id="subject" name="subject" required
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">Select a subject</option>
+                            <option value="general">General Inquiry</option>
+                            <option value="support">Technical Support</option>
+                            <option value="setup">Setup Assistance</option>
+                            <option value="billing">Billing Question</option>
+                            <option value="feature">Feature Request</option>
+                            <option value="partnership">Partnership</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label for="message" class="block text-sm font-medium text-gray-700 mb-2">Message</label>
+                        <textarea id="message" name="message" rows="6" required
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Tell us how we can help you..."></textarea>
+                    </div>
+                    
+                    <button type="submit" 
+                        class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 transition">
+                        Send Message
+                    </button>
+                </form>
+            </div>
+
+            <!-- Contact Information -->
+            <div class="space-y-8">
+                <!-- Contact Methods -->
+                <div class="bg-white rounded-xl shadow-sm p-8">
+                    <h2 class="text-2xl font-bold text-gray-900 mb-6">Contact Information</h2>
+                    <div class="space-y-6">
+                        <div class="flex items-start">
+                            <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
+                                <i class="fas fa-envelope text-blue-600"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900">Email Support</h3>
+                                <p class="text-gray-600">support@shipfile.com</p>
+                                <p class="text-sm text-gray-500 mt-1">We typically respond within 24 hours</p>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-start">
+                            <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mr-4">
+                                <i class="fas fa-comments text-green-600"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900">Live Chat</h3>
+                                <p class="text-gray-600">Available 9 AM - 6 PM EST</p>
+                                <p class="text-sm text-gray-500 mt-1">Monday through Friday</p>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-start">
+                            <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-4">
+                                <i class="fas fa-book text-purple-600"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900">Documentation</h3>
+                                <p class="text-gray-600">Comprehensive guides and tutorials</p>
+                                <a href="docs.html" class="text-blue-600 hover:text-blue-700 text-sm">View Documentation →</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- FAQ Section -->
+                <div class="bg-white rounded-xl shadow-sm p-8">
+                    <h2 class="text-2xl font-bold text-gray-900 mb-6">Frequently Asked Questions</h2>
+                    <div class="space-y-4">
+                        <div class="border-b border-gray-200 pb-4">
+                            <h3 class="font-semibold text-gray-900 mb-2">How do I get started with ShipFile?</h3>
+                            <p class="text-gray-600 text-sm">Simply connect your AWS S3 bucket using your credentials. Our setup guide will walk you through the entire process.</p>
+                        </div>
+                        
+                        <div class="border-b border-gray-200 pb-4">
+                            <h3 class="font-semibold text-gray-900 mb-2">Is my data secure?</h3>
+                            <p class="text-gray-600 text-sm">Yes! Your files stay in your AWS S3 bucket. We never store or access your data - we only provide the interface.</p>
+                        </div>
+                        
+                        <div class="border-b border-gray-200 pb-4">
+                            <h3 class="font-semibold text-gray-900 mb-2">Do I need technical knowledge to use ShipFile?</h3>
+                            <p class="text-gray-600 text-sm">Not at all! Our intuitive interface makes it easy for anyone to use, regardless of technical background.</p>
+                        </div>
+                        
+                        <div class="pb-4">
+                            <h3 class="font-semibold text-gray-900 mb-2">What AWS permissions do I need?</h3>
+                            <p class="text-gray-600 text-sm">You'll need S3 access permissions. Our documentation provides detailed setup instructions for AWS IAM configuration.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Office Hours -->
+                <div class="bg-blue-50 rounded-xl p-6">
+                    <h3 class="text-lg font-semibold text-blue-900 mb-3">Support Hours</h3>
+                    <div class="space-y-2 text-blue-800">
+                        <div class="flex justify-between">
+                            <span>Monday - Friday</span>
+                            <span>9:00 AM - 6:00 PM EST</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Saturday</span>
+                            <span>10:00 AM - 2:00 PM EST</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Sunday</span>
+                            <span>Closed</span>
+                        </div>
+                    </div>
+                    <p class="text-sm text-blue-700 mt-3">
+                        Emergency support available 24/7 for enterprise customers
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Additional Resources -->
+        <section class="mt-16">
+            <h2 class="text-3xl font-bold text-gray-900 mb-8 text-center">Additional Resources</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="bg-white rounded-xl shadow-sm p-6 text-center">
+                    <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-4">
+                        <i class="fas fa-book-open text-blue-600"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900 mb-3">Documentation</h3>
+                    <p class="text-gray-600 mb-4">Comprehensive guides, tutorials, and API documentation.</p>
+                    <a href="docs.html" class="text-blue-600 hover:text-blue-700 font-medium">
+                        View Docs →
+                    </a>
+                </div>
+                
+                <div class="bg-white rounded-xl shadow-sm p-6 text-center">
+                    <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-4">
+                        <i class="fas fa-video text-green-600"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900 mb-3">Video Tutorials</h3>
+                    <p class="text-gray-600 mb-4">Step-by-step video guides for setup and advanced features.</p>
+                    <a href="#" class="text-blue-600 hover:text-blue-700 font-medium">
+                        Watch Videos →
+                    </a>
+                </div>
+                
+                <div class="bg-white rounded-xl shadow-sm p-6 text-center">
+                    <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mx-auto mb-4">
+                        <i class="fas fa-users text-purple-600"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900 mb-3">Community</h3>
+                    <p class="text-gray-600 mb-4">Join our community forum to connect with other users.</p>
+                    <a href="#" class="text-blue-600 hover:text-blue-700 font-medium">
+                        Join Community →
+                    </a>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 text-white py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p>&copy; 2024 ShipFile. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        // Simple form handling
+        document.querySelector('form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            alert('Thank you for your message! We\'ll get back to you within 24 hours.');
+        });
+    </script>
+</body>
+</html>
