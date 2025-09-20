@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Upload, Download, Trash2, Eye, Share, Folder, 
   File, Image, FileText, Archive, Music, Video, Play,
-  Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit
+  Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit, BarChart3
 } from "lucide-react";
 import { useClerk } from "@clerk/clerk-react";
 import React from "react";
@@ -189,6 +189,9 @@ export default function FileManager() {
   });
   const [promptValue, setPromptValue] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [analytics, setAnalytics] = useState(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
@@ -558,7 +561,14 @@ export default function FileManager() {
       setHasOrganization(true);
       setShowCreateOrg(false);
       setOrgName('');
-      alert('Organization created successfully!');
+      setConfirmConfig({
+        title: 'Success',
+        message: 'Organization created successfully!',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'success'
+      });
+      setShowConfirmDialog(true);
     } catch (error) {
       console.error('Failed to create organization:', error);
       setConfirmConfig({
@@ -1349,17 +1359,38 @@ export default function FileManager() {
 
   const handlePasswordChange = async () => {
     if (!passwordData.newPassword || !passwordData.confirmPassword) {
-      alert('Please fill in all fields');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Please fill in all fields',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
 
     if (passwordData.newPassword !== passwordData.confirmPassword) {
-      alert('New passwords do not match');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'New passwords do not match',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
 
     if (passwordData.newPassword.length < 6) {
-      alert('Password must be at least 6 characters');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Password must be at least 6 characters',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
       return;
     }
 
@@ -1380,29 +1411,50 @@ export default function FileManager() {
       
       if (!response.ok) {
         if (data.isGoogleUser) {
-          alert(data.error);
-          setShowPasswordModal(false);
-          setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+          setConfirmConfig({
+            title: 'Google Account',
+            message: data.error,
+            confirmText: 'OK',
+            onConfirm: () => {
+              setShowPasswordModal(false);
+              setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+            },
+            type: 'info'
+          });
+          setShowConfirmDialog(true);
           return;
         }
         throw new Error(data.error || 'Failed to change password');
       }
       
-      alert('Password changed successfully! Please login again.');
-      setShowPasswordModal(false);
-      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      
-      // Logout user
-      localStorage.removeItem('currentMember');
-      localStorage.removeItem('currentOwner');
-      if (currentUser?.role === 'owner') {
-        signOut();
-      } else {
-        window.location.href = '/login';
-      }
+      setConfirmConfig({
+        title: 'Success',
+        message: 'Password changed successfully! Please login again.',
+        confirmText: 'OK',
+        onConfirm: () => {
+          setShowPasswordModal(false);
+          setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+          localStorage.removeItem('currentMember');
+          localStorage.removeItem('currentOwner');
+          if (currentUser?.role === 'owner') {
+            signOut();
+          } else {
+            window.location.href = '/login';
+          }
+        },
+        type: 'success'
+      });
+      setShowConfirmDialog(true);
     } catch (error) {
       console.error('Password change failed:', error);
-      alert(error.message || 'Failed to change password');
+      setConfirmConfig({
+        title: 'Error',
+        message: error.message || 'Failed to change password',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
@@ -1605,7 +1657,14 @@ export default function FileManager() {
       setSelectedMemberToCopy('');
     } catch (error) {
       console.error('Failed to copy permissions:', error);
-      alert('Failed to copy permissions');
+      setConfirmConfig({
+        title: 'Error',
+        message: 'Failed to copy permissions',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
@@ -1758,16 +1817,43 @@ export default function FileManager() {
       setShowEditPermissions(false);
       setEditingMember(null);
       loadAllMembers(); // Refresh the members list
-      alert('Member permissions updated successfully!');
+      setConfirmConfig({
+        title: 'Success',
+        message: 'Member permissions updated successfully!',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'success'
+      });
+      setShowConfirmDialog(true);
       
     } catch (error) {
       console.error('Failed to update member permissions:', error);
-      alert(error.message || 'Failed to update permissions');
+      setConfirmConfig({
+        title: 'Error',
+        message: error.message || 'Failed to update permissions',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
-  const handleRemoveMember = async (member) => {
-    if (!confirm(`Remove ${member.email} from the organization? They will lose access to this bucket.`)) return;
+  const handleRemoveMember = (member) => {
+    setConfirmConfig({
+      title: 'Remove Member',
+      message: `Remove ${member.email} from the organization? They will lose access to this bucket.`,
+      confirmText: 'remove',
+      onConfirm: () => performRemoveMember(member),
+      type: 'danger',
+      requiresTyping: true
+    });
+    setDeleteConfirmText('');
+    setShowConfirmDialog(true);
+    return;
+  };
+
+  const performRemoveMember = async (member) => {
     
     try {
       const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(member.email)}`, {
@@ -1784,11 +1870,25 @@ export default function FileManager() {
       }
       
       loadAllMembers(); // Refresh the members list
-      alert(`${member.email} has been removed from the organization.`);
+      setConfirmConfig({
+        title: 'Success',
+        message: `${member.email} has been removed from the organization.`,
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'success'
+      });
+      setShowConfirmDialog(true);
       
     } catch (error) {
       console.error('Failed to remove member:', error);
-      alert(error.message || 'Failed to remove member');
+      setConfirmConfig({
+        title: 'Error',
+        message: error.message || 'Failed to remove member',
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
     }
   };
 
@@ -1841,6 +1941,48 @@ export default function FileManager() {
       return details || 'Permissions updated';
     }
     return '-';
+  };
+
+  const loadBucketAnalytics = async () => {
+    setLoadingAnalytics(true);
+    try {
+      let userEmail = currentUser?.email;
+      if (!userEmail) {
+        const memberData = localStorage.getItem('currentMember');
+        const ownerData = localStorage.getItem('currentOwner');
+        if (memberData) {
+          userEmail = JSON.parse(memberData).email;
+        } else if (ownerData) {
+          userEmail = JSON.parse(ownerData).email;
+        }
+      }
+      
+      if (!userEmail) {
+        console.error('No user email found for analytics');
+        setAnalytics(null);
+        return;
+      }
+      
+      const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/analytics?ownerEmail=${encodeURIComponent(userEmail)}`);
+      
+      if (!response.ok) {
+        throw new Error(`Analytics request failed: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Analytics data:', data);
+      setAnalytics(data);
+    } catch (error) {
+      console.error('Failed to load analytics:', error);
+      setAnalytics(null);
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  };
+
+  const handleAnalyticsClick = () => {
+    setShowAnalytics(true);
+    loadBucketAnalytics();
   };
 
   const canGrantPermission = (permissionType, permissionValue) => {
@@ -1984,6 +2126,10 @@ export default function FileManager() {
               const isOwner = currentUser?.role === 'owner' || !!ownerData;
               return isOwner && (
                 <>
+                  <Button variant="outline" size="sm" onClick={handleAnalyticsClick}>
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                    Analytics
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setShowMembers(true)}>
                     <UserPlus className="h-4 w-4 mr-2" />
                     Members
@@ -3198,6 +3344,144 @@ export default function FileManager() {
         </DialogContent>
       </Dialog>
       
+      {/* Analytics Modal */}
+      <Dialog open={showAnalytics} onOpenChange={setShowAnalytics}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Bucket Analytics - {currentBucket}</DialogTitle>
+          </DialogHeader>
+          
+          {loadingAnalytics ? (
+            <div className="flex justify-center py-8">
+              <div className="text-gray-500">Loading analytics...</div>
+            </div>
+          ) : analytics ? (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Storage</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{analytics.totalSize}</div>
+                    <p className="text-xs text-gray-500">{analytics.totalFiles} files • {analytics.totalFolders || 0} folders</p>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Team</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{analytics.totalMembers || 0}</div>
+                    <p className="text-xs text-gray-500">Members • {analytics.totalShares || 0} shares</p>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Activity</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{analytics.activeUsers}</div>
+                    <p className="text-xs text-gray-500">Active users (30d)</p>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Recent Uploads</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{analytics.recentUploads}</div>
+                    <p className="text-xs text-gray-500">This week</p>
+                  </CardContent>
+                </Card>
+              </div>
+              
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Folder Analysis</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {analytics.topFolders && analytics.topFolders.length > 0 ? (
+                      analytics.topFolders.map((folder: any, index: number) => (
+                        <div key={index} className="flex justify-between items-center">
+                          <span className="text-sm truncate" title={folder.name}>{folder.name || 'Root'}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-500">{folder.size}</span>
+                            <span className="text-xs text-gray-400">({folder.files})</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">No folders found</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">File Types</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {analytics.fileTypes && analytics.fileTypes.length > 0 ? (
+                        analytics.fileTypes.slice(0, 6).map((type: any, index: number) => (
+                          <div key={index} className="flex justify-between items-center">
+                            <span className="text-sm font-medium">{type.extension.toUpperCase()}</span>
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 bg-gray-200 rounded-full h-2">
+                                <div 
+                                  className="bg-blue-600 h-2 rounded-full" 
+                                  style={{ width: `${Math.min((type.count / (analytics.totalFiles || 1)) * 100, 100)}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-sm text-gray-500 w-6 text-right">{type.count}</span>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-gray-500">No file types found</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Top Contributors</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {analytics.topUploaders && analytics.topUploaders.length > 0 ? (
+                        analytics.topUploaders.map((uploader: any, index: number) => (
+                          <div key={index} className="flex justify-between items-center">
+                            <span className="text-sm truncate">{uploader.email}</span>
+                            <span className="text-sm text-gray-500">{uploader.files} files</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-gray-500">No contributors found</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+              <p>No analytics data available</p>
+              <p className="text-sm mt-2">Upload some files to see analytics</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Footer */}
       <footer className="bg-white border-t mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">

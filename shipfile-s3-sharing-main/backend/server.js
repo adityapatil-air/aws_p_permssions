@@ -95,7 +95,7 @@ db.serialize(() => {
     resource_path TEXT NOT NULL,
     old_name TEXT,
     details TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    timestamp DATETIME NOT NULL
   )`);
   
   // Add missing columns to existing tables
@@ -124,14 +124,15 @@ const transporter = nodemailer.createTransport({
 
 // Helper function to log activities
 const logActivity = (bucketName, userEmail, action, resourcePath, oldName = null, details = null) => {
+  const timestamp = new Date().toISOString();
   db.run(
-    'INSERT INTO activity_logs (bucket_name, user_email, action, resource_path, old_name, details) VALUES (?, ?, ?, ?, ?, ?)',
-    [bucketName, userEmail, action, resourcePath, oldName, details],
+    'INSERT INTO activity_logs (bucket_name, user_email, action, resource_path, old_name, details, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [bucketName, userEmail, action, resourcePath, oldName, details, timestamp],
     function(err) {
       if (err) {
         console.error('Error logging activity:', err);
       } else {
-        console.log(`Activity logged: ${userEmail} ${action} ${resourcePath}`);
+        console.log(`Activity logged: ${userEmail} ${action} ${resourcePath} at ${timestamp}`);
       }
     }
   );
@@ -2724,6 +2725,374 @@ app.get('/api/share/:shareId/download/:fileKey(*)', async (req, res) => {
   }
 });
 
+// Get complete analytics for all buckets (owner only)
+app.get('/api/analytics/complete', async (req, res) => {
+  const { ownerEmail } = req.query;
+
+  try {
+    // Verify owner
+    if (!ownerEmail) {
+      return res.status(401).json({ error: 'Owner email required' });
+    }
+
+    // Get all buckets for owner
+    const buckets = await new Promise((resolve, reject) => {
+      db.all('SELECT name, access_key, secret_key, region FROM buckets WHERE owner_email = ?', [ownerEmail], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+
+    if (!buckets || buckets.length === 0) {
+      return res.status(404).json({ error: 'No buckets found' });
+    }
+
+    let totalSize = 0;
+    let totalFiles = 0;
+    let totalFolders = 0;
+    const allFileTypes = {};
+    const bucketStats = [];
+    const allFolders = {};
+    const memberStats = {};
+    const shareStats = {};
+
+    // Analyze each bucket
+    for (const bucket of buckets) {
+      const s3Client = new S3Client({
+        region: bucket.region,
+        credentials: {
+          accessKeyId: bucket.access_key,
+          secretAccessKey: bucket.secret_key,
+        },
+      });
+
+      try {
+        const command = new ListObjectsV2Command({ Bucket: bucket.name, MaxKeys: 1000 });
+        const response = await s3Client.send(command);
+
+        let bucketSize = 0;
+        let bucketFiles = 0;
+        let bucketFolders = 0;
+        const folderSet = new Set();
+
+        if (response.Contents) {
+          response.Contents.forEach(obj => {
+            if (obj.Key.endsWith('/')) {
+              folderSet.add(obj.Key);
+              bucketFolders++;
+            } else {
+              bucketFiles++;
+              bucketSize += obj.Size || 0;
+              totalFiles++;
+              totalSize += obj.Size || 0;
+              
+              const ext = obj.Key.split('.').pop()?.toLowerCase() || 'unknown';
+              allFileTypes[ext] = (allFileTypes[ext] || 0) + 1;
+              
+              // Track folder structure
+              if (obj.Key.includes('/')) {
+                const pathParts = obj.Key.split('/');
+                for (let i = 1; i < pathParts.length; i++) {
+                  const folderPath = pathParts.slice(0, i).join('/');
+                  if (folderPath) {
+                    folderSet.add(folderPath + '/');
+                  }
+                }
+              }
+              
+              const folderPath = obj.Key.includes('/') ? `${bucket.name}/${obj.Key.substring(0, obj.Key.lastIndexOf('/'))}` : `${bucket.name}/root`;
+              allFolders[folderPath] = (allFolders[folderPath] || { size: 0, files: 0 });
+              allFolders[folderPath].size += obj.Size || 0;
+              allFolders[folderPath].files += 1;
+            }
+          });
+        }
+
+        totalFolders += folderSet.size;
+        bucketStats.push({
+          name: bucket.name,
+          size: bucketSize,
+          files: bucketFiles,
+          folders: folderSet.size
+        });
+
+        // Get member count for this bucket
+        const memberCount = await new Promise((resolve) => {
+          db.get('SELECT COUNT(*) as count FROM members WHERE bucket_name = ?', [bucket.name], (err, result) => {
+            resolve(result ? result.count : 0);
+          });
+        });
+        memberStats[bucket.name] = memberCount;
+
+        // Get share count for this bucket
+        const shareCount = await new Promise((resolve) => {
+          db.get('SELECT COUNT(*) as count FROM shares WHERE bucket_name = ? AND revoked = 0 AND expires_at > datetime("now")', [bucket.name], (err, result) => {
+            resolve(result ? result.count : 0);
+          });
+        });
+        shareStats[bucket.name] = shareCount;
+
+      } catch (error) {
+        console.error(`Error analyzing bucket ${bucket.name}:`, error);
+      }
+    }
+
+    // Get overall activity stats
+    const activeUsers = await new Promise((resolve) => {
+      db.get('SELECT COUNT(DISTINCT user_email) as count FROM activity_logs WHERE timestamp > datetime("now", "-30 days")', [], (err, result) => {
+        resolve(result ? result.count : 0);
+      });
+    });
+
+    const recentUploads = await new Promise((resolve) => {
+      db.get('SELECT COUNT(*) as count FROM activity_logs WHERE action = "upload" AND timestamp > datetime("now", "-7 days")', [], (err, result) => {
+        resolve(result ? result.count : 0);
+      });
+    });
+
+    const totalMembers = await new Promise((resolve) => {
+      db.get('SELECT COUNT(*) as count FROM members', [], (err, result) => {
+        resolve(result ? result.count : 0);
+      });
+    });
+
+    const totalShares = await new Promise((resolve) => {
+      db.get('SELECT COUNT(*) as count FROM shares WHERE revoked = 0 AND expires_at > datetime("now")', [], (err, result) => {
+        resolve(result ? result.count : 0);
+      });
+    });
+
+    const recentActivity = await new Promise((resolve) => {
+      db.all('SELECT user_email, action, resource_path, timestamp, bucket_name FROM activity_logs ORDER BY timestamp DESC LIMIT 20', [], (err, rows) => {
+        resolve(rows || []);
+      });
+    });
+
+    // Format data
+    const formatSize = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    const topFileTypes = Object.entries(allFileTypes)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 10)
+      .map(([ext, count]) => ({ extension: ext, count }));
+
+    const topFolders = Object.entries(allFolders)
+      .sort(([,a], [,b]) => b.size - a.size)
+      .slice(0, 10)
+      .map(([name, data]) => ({ 
+        name: name.includes('/root') ? name.replace('/root', ' (Root)') : name, 
+        size: formatSize(data.size), 
+        files: data.files 
+      }));
+
+    const topBuckets = bucketStats
+      .sort((a, b) => b.size - a.size)
+      .map(bucket => ({
+        name: bucket.name,
+        size: formatSize(bucket.size),
+        files: bucket.files,
+        folders: bucket.folders,
+        members: memberStats[bucket.name] || 0,
+        shares: shareStats[bucket.name] || 0
+      }));
+
+    res.json({
+      totalSize: formatSize(totalSize),
+      totalFiles,
+      totalFolders,
+      totalBuckets: buckets.length,
+      totalMembers,
+      totalShares,
+      activeUsers,
+      recentUploads,
+      fileTypes: topFileTypes,
+      topFolders,
+      topBuckets,
+      recentActivity
+    });
+
+  } catch (error) {
+    console.error('Complete analytics error:', error);
+    res.status(500).json({ error: 'Failed to load complete analytics' });
+  }
+});
+
+// Get storage analytics for bucket (owner only)
+app.get('/api/buckets/:bucketName/analytics', async (req, res) => {
+  const { bucketName } = req.params;
+  const { ownerEmail } = req.query;
+
+  try {
+    // Verify owner
+    const bucket = await new Promise((resolve, reject) => {
+      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ? AND owner_email = ?', [bucketName, ownerEmail], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!bucket) {
+      return res.status(404).json({ error: 'Bucket not found or access denied' });
+    }
+
+    const s3Client = new S3Client({
+      region: bucket.region,
+      credentials: {
+        accessKeyId: bucket.access_key,
+        secretAccessKey: bucket.secret_key,
+      },
+    });
+
+    // Get all objects
+    const command = new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1000 });
+    const response = await s3Client.send(command);
+
+    let totalSize = 0;
+    let totalFiles = 0;
+    let totalFolders = 0;
+    const fileTypes = {};
+    const folderSizes = {};
+    const folderSet = new Set();
+    const uploadsByUser = {};
+    const sizeByUser = {};
+
+    if (response.Contents) {
+      response.Contents.forEach(obj => {
+        if (obj.Key.endsWith('/')) {
+          folderSet.add(obj.Key);
+        } else {
+          totalFiles++;
+          totalSize += obj.Size || 0;
+          
+          // File type analysis
+          const ext = obj.Key.split('.').pop()?.toLowerCase() || 'unknown';
+          fileTypes[ext] = (fileTypes[ext] || 0) + 1;
+          
+          // Track folder structure
+          if (obj.Key.includes('/')) {
+            const pathParts = obj.Key.split('/');
+            for (let i = 1; i < pathParts.length; i++) {
+              const folderPath = pathParts.slice(0, i).join('/');
+              if (folderPath) {
+                folderSet.add(folderPath + '/');
+              }
+            }
+          }
+          
+          // Folder size analysis
+          const folderPath = obj.Key.includes('/') ? obj.Key.substring(0, obj.Key.lastIndexOf('/')) : 'root';
+          folderSizes[folderPath] = (folderSizes[folderPath] || { size: 0, files: 0 });
+          folderSizes[folderPath].size += obj.Size || 0;
+          folderSizes[folderPath].files += 1;
+        }
+      });
+    }
+
+    totalFolders = folderSet.size;
+
+    // Get file ownership data for user statistics
+    const fileOwnership = await new Promise((resolve) => {
+      db.all('SELECT owner_email, COUNT(*) as files FROM file_ownership WHERE bucket_name = ? GROUP BY owner_email', [bucketName], (err, rows) => {
+        resolve(rows || []);
+      });
+    });
+
+    fileOwnership.forEach(row => {
+      uploadsByUser[row.owner_email] = row.files;
+    });
+
+    // Get user activity stats
+    const activeUsers = await new Promise((resolve) => {
+      db.get('SELECT COUNT(DISTINCT user_email) as count FROM activity_logs WHERE bucket_name = ? AND timestamp > datetime("now", "-30 days")', [bucketName], (err, result) => {
+        resolve(result ? result.count : 0);
+      });
+    });
+
+    const recentUploads = await new Promise((resolve) => {
+      db.get('SELECT COUNT(*) as count FROM activity_logs WHERE bucket_name = ? AND action = "upload" AND timestamp > datetime("now", "-7 days")', [bucketName], (err, result) => {
+        resolve(result ? result.count : 0);
+      });
+    });
+
+    const totalMembers = await new Promise((resolve) => {
+      db.get('SELECT COUNT(*) as count FROM members WHERE bucket_name = ?', [bucketName], (err, result) => {
+        resolve(result ? result.count : 0);
+      });
+    });
+
+    const totalShares = await new Promise((resolve) => {
+      db.get('SELECT COUNT(*) as count FROM shares WHERE bucket_name = ? AND revoked = 0 AND expires_at > datetime("now")', [bucketName], (err, result) => {
+        resolve(result ? result.count : 0);
+      });
+    });
+
+    const recentActivity = await new Promise((resolve) => {
+      db.all('SELECT user_email, action, resource_path, timestamp FROM activity_logs WHERE bucket_name = ? ORDER BY timestamp DESC LIMIT 15', [bucketName], (err, rows) => {
+        resolve(rows || []);
+      });
+    });
+
+    const memberList = await new Promise((resolve) => {
+      db.all('SELECT email, permissions, scope_type FROM members WHERE bucket_name = ?', [bucketName], (err, rows) => {
+        resolve(rows || []);
+      });
+    });
+
+    // Format data
+    const formatSize = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    const topFileTypes = Object.entries(fileTypes)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 8)
+      .map(([ext, count]) => ({ extension: ext, count }));
+
+    const topFolders = Object.entries(folderSizes)
+      .sort(([,a], [,b]) => b.size - a.size)
+      .slice(0, 8)
+      .map(([name, data]) => ({ 
+        name: name === 'root' ? 'Root Directory' : name, 
+        size: formatSize(data.size), 
+        files: data.files 
+      }));
+
+    const topUploaders = Object.entries(uploadsByUser)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 5)
+      .map(([email, files]) => ({ email, files }));
+
+    res.json({
+      totalSize: formatSize(totalSize),
+      totalFiles,
+      totalFolders,
+      totalMembers,
+      totalShares,
+      activeUsers,
+      recentUploads,
+      fileTypes: topFileTypes,
+      topFolders,
+      topUploaders,
+      memberList,
+      recentActivity
+    });
+
+  } catch (error) {
+    console.error('Analytics error:', error);
+    res.status(500).json({ error: 'Failed to load analytics' });
+  }
+});
+
 // Test email configuration
 app.post('/api/test-email', async (req, res) => {
   const { testEmail } = req.body;
@@ -2774,4 +3143,7 @@ app.listen(PORT, () => {
   console.log('- SMTP_PASS:', process.env.SMTP_PASS ? 'SET' : 'NOT SET');
   console.log('- FRONTEND_URL:', process.env.FRONTEND_URL);
   console.log('- Transporter configured:', !!transporter);
+  console.log('Analytics endpoints available:');
+  console.log('- GET /api/analytics/complete - Complete dashboard analytics (owner only)');
+  console.log('- GET /api/buckets/:bucketName/analytics - Bucket-specific analytics (owner only)');
 });

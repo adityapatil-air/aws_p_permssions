@@ -8,9 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Plus, Settings, Users } from "lucide-react";
+import { Plus, Settings, Users, BarChart3 } from "lucide-react";
 import { useClerk } from "@clerk/clerk-react";
 import React from "react";
+import MemberManagement from "./MemberManagement";
 
 interface Bucket {
   id: string;
@@ -63,6 +64,12 @@ export default function OwnerDashboard() {
   const [encryptKeys, setEncryptKeys] = useState(true);
   const [error, setError] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [selectedBucket, setSelectedBucket] = useState<string>("");
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [showMemberManagement, setShowMemberManagement] = useState(false);
+  const [selectedBucketForMembers, setSelectedBucketForMembers] = useState<string>("");
 
   const loadBuckets = React.useCallback(async () => {
     try {
@@ -150,12 +157,41 @@ export default function OwnerDashboard() {
     setError("");
   };
 
+  const loadStorageAnalytics = async (bucketName: string) => {
+    setLoadingAnalytics(true);
+    try {
+      const ownerEmail = user?.primaryEmailAddress?.emailAddress;
+      const url = bucketName === 'ALL' 
+        ? `http://localhost:3001/api/analytics/complete?ownerEmail=${encodeURIComponent(ownerEmail || '')}`
+        : `http://localhost:3001/api/buckets/${bucketName}/analytics?ownerEmail=${encodeURIComponent(ownerEmail || '')}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      setAnalytics(data);
+    } catch (error) {
+      console.error('Failed to load analytics:', error);
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  };
+
+  const handleAnalyticsClick = (bucketName: string) => {
+    setSelectedBucket(bucketName);
+    setShowAnalytics(true);
+    loadStorageAnalytics(bucketName);
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b px-6 py-4">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold">ShipFile Dashboard</h1>
           <div className="flex items-center space-x-2">
+            {buckets.length > 0 && (
+              <Button variant="outline" onClick={() => handleAnalyticsClick('ALL')}>
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Complete Analysis
+              </Button>
+            )}
             {user?.primaryEmailAddress?.emailAddress && (
               <span className="text-sm text-gray-600 px-2">
                 {user.primaryEmailAddress.emailAddress}
@@ -202,8 +238,10 @@ export default function OwnerDashboard() {
                       <TableCell>{bucket.userCount}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-
-                          <Button size="sm" variant="outline">
+                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleAnalyticsClick(bucket.name); }}>
+                            <BarChart3 className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setSelectedBucketForMembers(bucket.name); setShowMemberManagement(true); }}>
                             <Users className="h-4 w-4" />
                           </Button>
                           <Button size="sm" variant="outline">
@@ -306,6 +344,236 @@ export default function OwnerDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={showAnalytics} onOpenChange={setShowAnalytics}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{selectedBucket === 'ALL' ? 'Complete Storage Analysis - All Buckets' : `Storage Analytics - ${selectedBucket}`}</DialogTitle>
+          </DialogHeader>
+          
+          {loadingAnalytics ? (
+            <div className="flex justify-center py-8">
+              <div className="text-gray-500">Loading analytics...</div>
+            </div>
+          ) : analytics ? (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Total Storage</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{analytics.totalSize}</div>
+                    <p className="text-xs text-gray-500">{analytics.totalFiles} files • {analytics.totalFolders || 0} folders</p>
+                  </CardContent>
+                </Card>
+                
+                {selectedBucket === 'ALL' ? (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Infrastructure</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{analytics.totalBuckets}</div>
+                      <p className="text-xs text-gray-500">Buckets • {analytics.totalMembers || 0} members</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Team</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{analytics.totalMembers || 0}</div>
+                      <p className="text-xs text-gray-500">Members • {analytics.totalShares || 0} shares</p>
+                    </CardContent>
+                  </Card>
+                )}
+                
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Activity</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{analytics.activeUsers}</div>
+                    <p className="text-xs text-gray-500">Active users (30d)</p>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Recent Uploads</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{analytics.recentUploads}</div>
+                    <p className="text-xs text-gray-500">This week</p>
+                  </CardContent>
+                </Card>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">File Types Distribution</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
+                      {analytics.fileTypes?.map((type: any, index: number) => (
+                        <div key={index} className="flex justify-between items-center">
+                          <span className="text-sm font-medium">{type.extension.toUpperCase()}</span>
+                          <div className="flex items-center gap-2">
+                            <div className="w-24 bg-gray-200 rounded-full h-2">
+                              <div 
+                                className="bg-blue-600 h-2 rounded-full" 
+                                style={{ width: `${Math.min((type.count / analytics.totalFiles) * 100, 100)}%` }}
+                              ></div>
+                            </div>
+                            <span className="text-sm text-gray-500 w-8 text-right">{type.count}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                {selectedBucket === 'ALL' && analytics.topBuckets ? (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Bucket Overview</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3 max-h-64 overflow-y-auto">
+                        {analytics.topBuckets.map((bucket: any, index: number) => (
+                          <div key={index} className="p-3 border rounded-lg">
+                            <div className="flex justify-between items-start">
+                              <span className="text-sm font-medium">{bucket.name}</span>
+                              <span className="text-sm text-gray-500">{bucket.size}</span>
+                            </div>
+                            <div className="flex justify-between text-xs text-gray-400 mt-1">
+                              <span>{bucket.files} files • {bucket.folders || 0} folders</span>
+                              <span>{bucket.members || 0} members • {bucket.shares || 0} shares</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : analytics.topUploaders ? (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Top Contributors</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {analytics.topUploaders.map((uploader: any, index: number) => (
+                          <div key={index} className="flex justify-between items-center">
+                            <span className="text-sm truncate">{uploader.email}</span>
+                            <span className="text-sm text-gray-500">{uploader.files} files</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Team Members</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {analytics.memberList?.map((member: any, index: number) => (
+                          <div key={index} className="flex justify-between items-center">
+                            <span className="text-sm truncate">{member.email}</span>
+                            <span className="text-xs text-gray-400">{member.scope_type || 'full'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+                
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">{selectedBucket === 'ALL' ? 'Top Folders (All Buckets)' : 'Folder Analysis'}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {analytics.topFolders?.map((folder: any, index: number) => (
+                        <div key={index} className="flex justify-between items-center">
+                          <span className="text-sm truncate" title={folder.name}>{folder.name || 'Root'}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-500">{folder.size}</span>
+                            <span className="text-xs text-gray-400">({folder.files})</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+              
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Recent Activity Log</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {analytics.recentActivity?.map((activity: any, index: number) => (
+                      <div key={index} className="flex justify-between items-start py-2 border-b border-gray-100 last:border-0">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">{activity.user_email}</span>
+                            <span className="text-xs bg-gray-100 px-2 py-1 rounded">{activity.action}</span>
+                            {selectedBucket === 'ALL' && activity.bucket_name && (
+                              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{activity.bucket_name}</span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-500 truncate mt-1" title={activity.resource_path}>
+                            {activity.resource_path}
+                          </div>
+                        </div>
+                        <span className="text-xs text-gray-400 whitespace-nowrap ml-2">
+                          {new Date(activity.timestamp).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+              <p>No analytics data available</p>
+              <p className="text-sm mt-2">Upload some files to see analytics</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <MemberManagement
+        open={showMemberManagement}
+        onOpenChange={setShowMemberManagement}
+        bucketName={selectedBucketForMembers}
+        ownerEmail={user?.primaryEmailAddress?.emailAddress || ""}
+      />
+      
+      {/* Footer */}
+      <footer className="bg-white border-t mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex justify-between items-center text-sm text-gray-500">
+            <div>
+              <span>&copy; 2025 ShipFile. All rights reserved.</span>
+            </div>
+            <div className="flex space-x-6">
+              <a href="landing.html" className="hover:text-gray-700">Home</a>
+              <a href="docs.html" className="hover:text-gray-700">Documentation</a>
+              <a href="about.html" className="hover:text-gray-700">About</a>
+              <a href="contact.html" className="hover:text-gray-700">Contact</a>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
