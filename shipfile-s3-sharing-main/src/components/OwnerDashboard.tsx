@@ -522,7 +522,17 @@ export default function OwnerDashboard() {
                       <div key={index} className="flex justify-between items-start py-2 border-b border-gray-100 last:border-0">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">{activity.user_email}</span>
+                            <span className="text-sm font-medium">
+                              {(() => {
+                                const ownerData = localStorage.getItem('currentOwner');
+                                const ownerEmail = ownerData ? JSON.parse(ownerData).email : user?.primaryEmailAddress?.emailAddress;
+                                
+                                if (activity.user_email === ownerEmail || activity.user_email === 'owner') {
+                                  return 'owner';
+                                }
+                                return activity.user_email;
+                              })()} 
+                            </span>
                             <span className="text-xs bg-gray-100 px-2 py-1 rounded">{activity.action}</span>
                             {selectedBucket === 'ALL' && activity.bucket_name && (
                               <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">{activity.bucket_name}</span>

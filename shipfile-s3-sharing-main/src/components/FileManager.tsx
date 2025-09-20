@@ -11,6 +11,8 @@ import {
   File, Image, FileText, Archive, Music, Video, Play,
   Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit, BarChart3
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Toaster } from "@/components/ui/toaster";
 import { useClerk } from "@clerk/clerk-react";
 import React from "react";
 
@@ -111,6 +113,7 @@ const FolderTreeNode = ({ tree, level, expandedFolders, selectedFolderPaths, onT
 
 export default function FileManager() {
   const { signOut } = useClerk();
+  const { toast } = useToast();
   const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -399,6 +402,12 @@ export default function FileManager() {
       setFolderName('');
       setShowNewFolder(false);
       loadFiles();
+      
+      toast({
+        title: "Folder Created",
+        description: `Folder "${folderName.trim()}" created successfully`,
+        className: "bg-green-100 border-green-400 text-green-800"
+      });
     } catch (error) {
       console.error('Failed to create folder:', error);
       setConfirmConfig({
@@ -714,15 +723,17 @@ export default function FileManager() {
       setSelectedMemberToCopy('');
       
       if (data.emailSent) {
-        setConfirmConfig({
-          title: 'Success',
-          message: `Invitation email sent successfully to ${inviteEmail}!`,
-          confirmText: 'OK',
-          onConfirm: () => {},
-          type: 'success'
+        toast({
+          title: "Invite Sent",
+          description: `Invitation email sent to ${inviteEmail}`,
+          className: "bg-green-100 border-green-400 text-green-800"
         });
-        setShowConfirmDialog(true);
       } else {
+        toast({
+          title: "Invite Created",
+          description: `Invitation link created for ${inviteEmail}`,
+          className: "bg-green-100 border-green-400 text-green-800"
+        });
         setConfirmConfig({
           title: 'Invitation Created',
           message: `Share this link with ${inviteEmail}:\n\n${data.inviteLink}`,
@@ -850,6 +861,12 @@ export default function FileManager() {
       
       setSelectedFiles([]);
       await loadFiles();
+      
+      toast({
+        title: "Files Deleted",
+        description: `${selectedFiles.length} item(s) deleted successfully`,
+        className: "bg-red-100 border-red-400 text-red-800"
+      });
     } catch (error) {
       console.error('Delete failed:', error);
       setConfirmConfig({
@@ -1263,6 +1280,12 @@ export default function FileManager() {
       
       await loadFiles(); // Refresh the file list
       
+      toast({
+        title: "File Renamed",
+        description: `"${file.name}" renamed successfully`,
+        className: "bg-green-100 border-green-400 text-green-800"
+      });
+      
       // Refresh member permissions if user is a member (in case folder permissions were updated)
       const memberData = localStorage.getItem('currentMember');
       if (memberData) {
@@ -1344,6 +1367,11 @@ export default function FileManager() {
       }
       
       await loadFiles(); // Refresh the file list
+      toast({
+        title: "File Deleted",
+        description: `"${file.name}" deleted successfully`,
+        className: "bg-red-100 border-red-400 text-red-800"
+      });
     } catch (error) {
       console.error('Delete failed:', error);
       setConfirmConfig({
@@ -1817,14 +1845,12 @@ export default function FileManager() {
       setShowEditPermissions(false);
       setEditingMember(null);
       loadAllMembers(); // Refresh the members list
-      setConfirmConfig({
-        title: 'Success',
-        message: 'Member permissions updated successfully!',
-        confirmText: 'OK',
-        onConfirm: () => {},
-        type: 'success'
+      
+      toast({
+        title: "Permissions Updated",
+        description: `Permissions updated for ${editingMember?.email}`,
+        className: "bg-green-100 border-green-400 text-green-800"
       });
-      setShowConfirmDialog(true);
       
     } catch (error) {
       console.error('Failed to update member permissions:', error);
@@ -1870,14 +1896,15 @@ export default function FileManager() {
       }
       
       loadAllMembers(); // Refresh the members list
-      setConfirmConfig({
-        title: 'Success',
-        message: `${member.email} has been removed from the organization.`,
-        confirmText: 'OK',
-        onConfirm: () => {},
-        type: 'success'
+      setShowMembers(false); // Navigate back to member list
+      setShowEditPermissions(false); // Close edit permissions window
+      setEditingMember(null); // Clear editing member
+      
+      toast({
+        title: "Member Removed",
+        description: `${member.email} has been removed from the organization`,
+        className: "bg-red-100 border-red-400 text-red-800"
       });
-      setShowConfirmDialog(true);
       
     } catch (error) {
       console.error('Failed to remove member:', error);
@@ -3198,7 +3225,15 @@ export default function FileManager() {
                         {new Date(log.timestamp).toLocaleString()}
                       </TableCell>
                       <TableCell className="text-sm font-medium">
-                        {log.user_email}
+                        {(() => {
+                          const ownerData = localStorage.getItem('currentOwner');
+                          const ownerEmail = ownerData ? JSON.parse(ownerData).email : currentUser?.email;
+                          
+                          if (log.user_email === ownerEmail || log.user_email === 'owner') {
+                            return 'owner';
+                          }
+                          return log.user_email;
+                        })()}
                       </TableCell>
                       <TableCell className="text-sm">
                         {formatAction(log.action)}
@@ -3498,6 +3533,7 @@ export default function FileManager() {
           </div>
         </div>
       </footer>
+      <Toaster />
     </div>
   );
 }

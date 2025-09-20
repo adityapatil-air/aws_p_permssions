@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Users } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useToast } from '@/hooks/use-toast';
 
 interface Member {
   email: string;
@@ -27,6 +28,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
   bucketName,
   ownerEmail
 }) => {
+  const { toast } = useToast();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -225,13 +227,12 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       setShowEditPermissions(false);
       setEditingMember(null);
       loadMembers();
-      setConfirmConfig({
-        title: 'Success',
-        message: 'Member permissions updated successfully!',
-        onConfirm: () => {},
-        memberToRemove: null
+      
+      toast({
+        title: "Permissions Updated",
+        description: `Permissions updated for ${editingMember?.email}`,
+        className: "bg-green-100 border-green-400 text-green-800"
       });
-      setShowConfirmDialog(true);
       
     } catch (error) {
       console.error('Failed to update member permissions:', error);
@@ -264,13 +265,12 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       }
       
       loadMembers();
-      setConfirmConfig({
-        title: 'Success',
-        message: `${member.email} has been removed from the organization.`,
-        onConfirm: () => {},
-        memberToRemove: null
+      
+      toast({
+        title: "Member Removed",
+        description: `${member.email} has been removed from the organization`,
+        className: "bg-red-100 border-red-400 text-red-800"
       });
-      setShowConfirmDialog(true);
       
     } catch (error) {
       console.error('Failed to remove member:', error);
