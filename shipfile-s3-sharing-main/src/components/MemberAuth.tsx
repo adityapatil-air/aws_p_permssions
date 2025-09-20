@@ -38,9 +38,22 @@ const MemberAuth = () => {
         throw new Error(data.error || 'Login failed');
       }
 
-      setMember(data.member);
-      localStorage.setItem('currentMember', JSON.stringify(data.member));
-      navigate(`/file-manager?bucket=${data.member.bucketName}`);
+      // Handle multiple buckets
+      if (data.buckets && data.buckets.length > 0) {
+        const memberData = {
+          email: data.email,
+          buckets: data.buckets
+        };
+        setMember(memberData);
+        localStorage.setItem('currentMember', JSON.stringify(memberData));
+        // If only one bucket, go directly to it
+        if (data.buckets.length === 1) {
+          navigate(`/file-manager?bucket=${data.buckets[0].bucketName}`);
+        }
+        // If multiple buckets, stay on this page to show bucket selection
+      } else {
+        throw new Error('No buckets found for this member');
+      }
 
     } catch (error) {
       setError(error.message);
@@ -69,8 +82,17 @@ const MemberAuth = () => {
           return;
         }
 
-        setMember(data.member);
-        localStorage.setItem('currentMember', JSON.stringify(data.member));
+        // Handle multiple buckets
+        if (data.buckets && data.buckets.length > 0) {
+          const memberData = {
+            email: data.email,
+            buckets: data.buckets
+          };
+          setMember(memberData);
+          localStorage.setItem('currentMember', JSON.stringify(memberData));
+        } else {
+          throw new Error('No buckets found for this member');
+        }
 
       } catch (error) {
         setError('You are not a member of any organization');
@@ -102,20 +124,27 @@ const MemberAuth = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Role: {member.role} | Permissions: {member.bucketPermissions} | Scope: {member.scopeType}
-              </AlertDescription>
-            </Alert>
             <div className="space-y-3">
-              <Button 
-                onClick={() => navigate(`/file-manager?bucket=${member.bucketName}`)}
-                variant="hero" 
-                className="w-full"
-              >
-                Access Files
-              </Button>
+              <h3 className="text-lg font-semibold mb-2">Your Buckets:</h3>
+              {member.buckets.map((bucket, index) => (
+                <div key={index} className="border rounded-lg p-3">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h4 className="font-medium">{bucket.bucketName}</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Scope: {bucket.scopeType || 'entire'}
+                      </p>
+                    </div>
+                    <Button 
+                      onClick={() => navigate(`/file-manager?bucket=${bucket.bucketName}`)}
+                      variant="hero" 
+                      size="sm"
+                    >
+                      Access
+                    </Button>
+                  </div>
+                </div>
+              ))}
               <Button 
                 onClick={() => {
                   setMember(null);

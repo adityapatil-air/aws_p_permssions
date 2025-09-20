@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Upload, Download, Trash2, Eye, Share, Folder, 
   File, Image, FileText, Archive, Music, Video, Play,
-  Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit, BarChart3
+  Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit, BarChart3, Moon, Sun
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
@@ -195,6 +195,7 @@ export default function FileManager() {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analytics, setAnalytics] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
@@ -2073,11 +2074,11 @@ export default function FileManager() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b px-6 py-4">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col transition-colors">
+      <header className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-6 py-4 transition-colors">
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-4">
-            <h1 className="text-2xl font-bold">ShipFile</h1>
+            <h1 className="text-2xl font-bold dark:text-white">ShipFile</h1>
             <div className="flex items-center space-x-1 text-sm">
               {(() => {
                 // Always refresh member data from localStorage to get latest permissions
@@ -2168,6 +2169,16 @@ export default function FileManager() {
                 </>
               );
             })()}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => {
+                setIsDarkMode(!isDarkMode);
+                document.documentElement.classList.toggle('dark');
+              }}
+            >
+              {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowPasswordModal(true)}>
               <Settings className="h-4 w-4" />
             </Button>
@@ -2261,7 +2272,7 @@ export default function FileManager() {
               <select 
                 value={filterType} 
                 onChange={(e) => setFilterType(e.target.value)}
-                className="px-3 py-1 border rounded text-sm"
+                className="px-3 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
               >
                 <option value="all">All Files</option>
                 <option value="folders">Folders</option>
@@ -2272,7 +2283,7 @@ export default function FileManager() {
               <select 
                 value={sortBy} 
                 onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-1 border rounded text-sm"
+                className="px-3 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
               >
                 <option value="name">Sort by Name</option>
                 <option value="date">Sort by Date</option>
@@ -2298,30 +2309,30 @@ export default function FileManager() {
           </div>
 
           {/* File List */}
-          <Card>
+          <Card className="dark:bg-gray-800 dark:border-gray-700">
             <CardContent className="p-0">
               {viewMode === 'list' ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">
+                <Table className="dark:text-gray-200">
+                  <TableHeader className="dark:border-gray-700">
+                    <TableRow className="dark:border-gray-700">
+                      <TableHead className="w-12 dark:text-gray-300">
                         <input
                           type="checkbox"
                           checked={selectedFiles.length > 0 && selectedFiles.length === files.length}
                           onChange={handleSelectAll}
                         />
                       </TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Size</TableHead>
-                      <TableHead>Modified</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="dark:text-gray-300">Name</TableHead>
+                      <TableHead className="dark:text-gray-300">Size</TableHead>
+                      <TableHead className="dark:text-gray-300">Modified</TableHead>
+                      <TableHead className="dark:text-gray-300">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredFiles.map((file) => {
                       console.log(`Rendering file ${file.name}: isOwned=${file.isOwned}, hasRenamePermission=${hasPermission('rename', file)}`);
                       return (
-                        <TableRow key={file.id}>
+                        <TableRow key={file.id} className="dark:border-gray-700 dark:hover:bg-gray-700">
                         <TableCell>
                           <input
                             type="checkbox"
@@ -3518,9 +3529,9 @@ export default function FileManager() {
       </Dialog>
 
       {/* Footer */}
-      <footer className="bg-white border-t mt-auto">
+      <footer className="bg-white dark:bg-gray-800 border-t dark:border-gray-700 mt-auto transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center text-sm text-gray-500">
+          <div className="flex justify-between items-center text-sm text-gray-500 dark:text-gray-400">
             <div>
               <span>&copy; 2025 ShipFile. All rights reserved.</span>
             </div>

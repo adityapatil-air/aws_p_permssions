@@ -446,6 +446,30 @@ app.get('/api/buckets', (req, res) => {
   });
 });
 
+// Get buckets for member
+app.get('/api/member/buckets', (req, res) => {
+  const { memberEmail } = req.query;
+  
+  if (!memberEmail) {
+    return res.status(400).json({ error: 'Member email is required' });
+  }
+  
+  db.all('SELECT bucket_name, permissions, scope_type, scope_folders FROM members WHERE email = ?', [memberEmail], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+    
+    const buckets = rows.map(row => ({
+      bucketName: row.bucket_name,
+      permissions: row.permissions,
+      scopeType: row.scope_type,
+      scopeFolders: row.scope_folders
+    }));
+    
+    res.json(buckets);
+  });
+});
+
 // Generate pre-signed upload URL
 app.post('/api/upload-url', async (req, res) => {
   const { bucketName, fileName, fileType, folderPath = '', userEmail } = req.body;
@@ -1490,29 +1514,64 @@ app.post('/api/invite/:token/accept', async (req, res) => {
       db.get('SELECT created_by FROM invitations WHERE id = ?', [token], (err, inviteData) => {
         const invitedBy = inviteData?.created_by || 'owner';
         
-        db.run(
-          'INSERT OR REPLACE INTO members (email, password, bucket_name, permissions, scope_type, scope_folders, invited_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [invite.email, password, invite.bucket_name, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy],
-          function(err) {
-            if (err) {
-              return res.status(500).json({ error: 'Failed to create member account' });
-            }
-            
-            db.run('UPDATE invitations SET accepted = 1 WHERE id = ?', [token], (err) => {
-              if (err) {
-                return res.status(500).json({ error: 'Failed to accept invitation' });
-              }
-              
-              res.json({ 
-                message: 'Account created successfully',
-                bucketName: invite.bucket_name,
-                email: invite.email,
-                scopeType: invite.scope_type,
-                scopeFolders: invite.scope_folders
-              });
-            });
+        // Check if member already exists for this bucket
+        db.get('SELECT * FROM members WHERE email = ? AND bucket_name = ?', [invite.email, invite.bucket_name], (err, existingMember) => {
+          if (err) {
+            return res.status(500).json({ error: 'Database error checking existing member' });
           }
-        );
+          
+          if (existingMember) {
+            // Update existing member's permissions
+            db.run(
+              'UPDATE members SET password = ?, permissions = ?, scope_type = ?, scope_folders = ?, invited_by = ? WHERE email = ? AND bucket_name = ?',
+              [password, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy, invite.email, invite.bucket_name],
+              function(err) {
+                if (err) {
+                  return res.status(500).json({ error: 'Failed to update member account' });
+                }
+                
+                db.run('UPDATE invitations SET accepted = 1 WHERE id = ?', [token], (err) => {
+                  if (err) {
+                    return res.status(500).json({ error: 'Failed to accept invitation' });
+                  }
+                  
+                  res.json({ 
+                    message: 'Account updated successfully',
+                    bucketName: invite.bucket_name,
+                    email: invite.email,
+                    scopeType: invite.scope_type,
+                    scopeFolders: invite.scope_folders
+                  });
+                });
+              }
+            );
+          } else {
+            // Insert new member for this bucket
+            db.run(
+              'INSERT INTO members (email, password, bucket_name, permissions, scope_type, scope_folders, invited_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [invite.email, password, invite.bucket_name, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy],
+              function(err) {
+                if (err) {
+                  return res.status(500).json({ error: 'Failed to create member account' });
+                }
+                
+                db.run('UPDATE invitations SET accepted = 1 WHERE id = ?', [token], (err) => {
+                  if (err) {
+                    return res.status(500).json({ error: 'Failed to accept invitation' });
+                  }
+                  
+                  res.json({ 
+                    message: 'Account created successfully',
+                    bucketName: invite.bucket_name,
+                    email: invite.email,
+                    scopeType: invite.scope_type,
+                    scopeFolders: invite.scope_folders
+                  });
+                });
+              }
+            );
+          }
+        });
       });
     });
   } catch (error) {
@@ -1525,23 +1584,27 @@ app.post('/api/member/login', async (req, res) => {
   const { email, password } = req.body;
   
   try {
-    db.get('SELECT * FROM members WHERE email = ? AND password = ?', [email, password], (err, member) => {
+    // Get all buckets this member belongs to
+    db.all('SELECT * FROM members WHERE email = ? AND password = ?', [email, password], (err, members) => {
       if (err) {
         return res.status(500).json({ error: 'Database error' });
       }
-      if (!member) {
+      if (!members || members.length === 0) {
         return res.status(401).json({ error: 'Invalid email or password' });
       }
       
+      // Return all buckets the member has access to
+      const buckets = members.map(member => ({
+        bucketName: member.bucket_name,
+        permissions: member.permissions,
+        scopeType: member.scope_type,
+        scopeFolders: member.scope_folders
+      }));
+      
       res.json({
         message: 'Login successful',
-        member: {
-          email: member.email,
-          bucketName: member.bucket_name,
-          permissions: member.permissions,
-          scopeType: member.scope_type,
-          scopeFolders: member.scope_folders
-        }
+        email: email,
+        buckets: buckets
       });
     });
   } catch (error) {
@@ -2229,12 +2292,37 @@ app.get('/api/members/:email/permissions', async (req, res) => {
         return res.status(500).json({ error: 'Database error' });
       }
       if (!member) {
-        return res.status(404).json({ error: 'Member not found' });
+        return res.status(404).json({ error: 'Member not found in this bucket' });
       }
       res.json(member);
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get member permissions' });
+  }
+});
+
+// Get member's bucket-specific permissions
+app.get('/api/member/:email/bucket/:bucketName', async (req, res) => {
+  const { email, bucketName } = req.params;
+
+  try {
+    db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
+      [email, bucketName], (err, member) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+      if (!member) {
+        return res.status(404).json({ error: 'Member not found in this bucket' });
+      }
+      res.json({
+        bucketName: bucketName,
+        permissions: member.permissions,
+        scopeType: member.scope_type,
+        scopeFolders: member.scope_folders
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get member bucket permissions' });
   }
 });
 
@@ -2304,23 +2392,27 @@ app.post('/api/member/google-login', async (req, res) => {
   const { email } = req.body;
   
   try {
-    db.get('SELECT * FROM members WHERE email = ?', [email], (err, member) => {
+    // Get all buckets this member belongs to
+    db.all('SELECT * FROM members WHERE email = ?', [email], (err, members) => {
       if (err) {
         return res.status(500).json({ error: 'Database error' });
       }
-      if (!member) {
+      if (!members || members.length === 0) {
         return res.status(401).json({ error: 'You are not a member of any organization. Please contact your administrator for an invitation.' });
       }
       
+      // Return all buckets the member has access to
+      const buckets = members.map(member => ({
+        bucketName: member.bucket_name,
+        permissions: member.permissions,
+        scopeType: member.scope_type,
+        scopeFolders: member.scope_folders
+      }));
+      
       res.json({
         message: 'Google login successful',
-        member: {
-          email: member.email,
-          bucketName: member.bucket_name,
-          permissions: member.permissions,
-          scopeType: member.scope_type,
-          scopeFolders: member.scope_folders
-        }
+        email: email,
+        buckets: buckets
       });
     });
   } catch (error) {

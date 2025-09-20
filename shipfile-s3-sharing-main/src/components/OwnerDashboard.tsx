@@ -181,10 +181,10 @@ export default function OwnerDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b px-6 py-4">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col transition-colors">
+      <header className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-6 py-4 transition-colors">
         <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">ShipFile Dashboard</h1>
+          <h1 className="text-2xl font-bold dark:text-white">ShipFile Dashboard</h1>
           <div className="flex items-center space-x-2">
             {buckets.length > 0 && (
               <Button variant="outline" onClick={() => handleAnalyticsClick('ALL')}>
