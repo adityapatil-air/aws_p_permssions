@@ -8,9 +8,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Plus, Settings, Users, BarChart3 } from "lucide-react";
+import { Plus, Settings, Users, BarChart3, Moon, Sun } from "lucide-react";
 import { useClerk } from "@clerk/clerk-react";
 import React from "react";
+import { useDarkMode } from '../hooks/use-dark-mode';
+
 import MemberManagement from "./MemberManagement";
 
 interface Bucket {
@@ -54,6 +56,8 @@ const AWS_REGIONS = [
 
 export default function OwnerDashboard() {
   const { signOut, user } = useClerk();
+  const { isDarkMode, toggleDarkMode } = useDarkMode();
+
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [showAddBucket, setShowAddBucket] = useState(false);
   const [accessKey, setAccessKey] = useState("");
@@ -70,6 +74,7 @@ export default function OwnerDashboard() {
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [showMemberManagement, setShowMemberManagement] = useState(false);
   const [selectedBucketForMembers, setSelectedBucketForMembers] = useState<string>("");
+
 
   const loadBuckets = React.useCallback(async () => {
     try {
@@ -192,6 +197,14 @@ export default function OwnerDashboard() {
                 Complete Analysis
               </Button>
             )}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={toggleDarkMode}
+            >
+              {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+
             {user?.primaryEmailAddress?.emailAddress && (
               <span className="text-sm text-gray-600 px-2">
                 {user.primaryEmailAddress.emailAddress}
@@ -210,7 +223,7 @@ export default function OwnerDashboard() {
       <main className="p-6">
         <div className="max-w-6xl mx-auto space-y-6">
           <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">Your S3 Buckets</h2>
+            <h2 className="text-xl font-semibold dark:text-white">Your S3 Buckets</h2>
             <Button onClick={() => setShowAddBucket(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Add Bucket

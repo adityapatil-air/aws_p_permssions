@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, User, Mail, AlertCircle } from 'lucide-react';
+import { ArrowLeft, User, Mail, AlertCircle, Moon, Sun } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SignIn, useUser, useClerk } from '@clerk/clerk-react';
 
 const MemberAuth = () => {
   const navigate = useNavigate();
+  const { isDarkMode, toggleDarkMode } = useDarkMode();
+
   const { isSignedIn, user } = useUser();
   const { signOut } = useClerk();
   const [email, setEmail] = useState('');
@@ -19,6 +22,7 @@ const MemberAuth = () => {
   const [loading, setLoading] = useState(false);
   const [member, setMember] = useState(null);
   const [showEmailLogin, setShowEmailLogin] = useState(false);
+
 
   const handleEmailLogin = async (e) => {
     e.preventDefault();
@@ -112,7 +116,7 @@ const MemberAuth = () => {
 
   if (member) {
     return (
-      <div className="min-h-screen bg-gradient-secondary flex items-center justify-center px-4">
+      <div className="min-h-screen bg-gradient-secondary dark:bg-gray-900 flex items-center justify-center px-4 transition-colors">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 p-4 bg-accent rounded-full w-fit">
@@ -125,7 +129,16 @@ const MemberAuth = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-3">
-              <h3 className="text-lg font-semibold mb-2">Your Buckets:</h3>
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-lg font-semibold">Your Buckets:</h3>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={toggleDarkMode}
+                >
+                  {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </Button>
+              </div>
               {member.buckets.map((bucket, index) => (
                 <div key={index} className="border rounded-lg p-3">
                   <div className="flex justify-between items-center">
@@ -164,8 +177,8 @@ const MemberAuth = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-secondary flex flex-col">
-      <header className="border-b border-border bg-white/80 backdrop-blur-sm">
+    <div className="min-h-screen bg-gradient-secondary dark:bg-gray-900 flex flex-col transition-colors">
+      <header className="border-b border-border bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm transition-colors">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Button variant="ghost" size="sm" asChild>
             <Link to="/login" className="flex items-center space-x-2">
@@ -173,7 +186,7 @@ const MemberAuth = () => {
               <span>Back to Login</span>
             </Link>
           </Button>
-          <span className="text-lg font-semibold text-foreground">ShipFile</span>
+          <span className="text-lg font-semibold text-foreground dark:text-white">ShipFile</span>
         </div>
       </header>
 

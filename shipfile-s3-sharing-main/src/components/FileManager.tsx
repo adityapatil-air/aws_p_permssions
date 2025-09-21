@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 import { useClerk } from "@clerk/clerk-react";
 import React from "react";
+import { useDarkMode } from '../hooks/use-dark-mode';
 
 interface FileItem {
   id: string;
@@ -195,7 +196,7 @@ export default function FileManager() {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analytics, setAnalytics] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDarkMode, toggleDarkMode } = useDarkMode();
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
@@ -2078,7 +2079,19 @@ export default function FileManager() {
       <header className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 px-6 py-4 transition-colors">
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-4">
-            <h1 className="text-2xl font-bold dark:text-white">ShipFile</h1>
+            <h1 className="text-2xl font-bold dark:text-white cursor-pointer hover:text-blue-600 dark:hover:text-blue-400" onClick={() => {
+              // Navigate to appropriate dashboard based on user type
+              const memberData = localStorage.getItem('currentMember');
+              const ownerData = localStorage.getItem('currentOwner');
+              
+              if (memberData) {
+                window.location.href = '/member-auth';
+              } else if (ownerData) {
+                window.location.href = '/owner-dashboard';
+              } else {
+                window.location.href = '/login';
+              }
+            }}>ShipFile</h1>
             <div className="flex items-center space-x-1 text-sm">
               {(() => {
                 // Always refresh member data from localStorage to get latest permissions
@@ -2151,7 +2164,8 @@ export default function FileManager() {
             )}
             {(() => {
               const ownerData = localStorage.getItem('currentOwner');
-              const isOwner = currentUser?.role === 'owner' || !!ownerData;
+              const memberData = localStorage.getItem('currentMember');
+              const isOwner = !!ownerData && !memberData;
               return isOwner && (
                 <>
                   <Button variant="outline" size="sm" onClick={handleAnalyticsClick}>
@@ -2172,10 +2186,7 @@ export default function FileManager() {
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={() => {
-                setIsDarkMode(!isDarkMode);
-                document.documentElement.classList.toggle('dark');
-              }}
+              onClick={toggleDarkMode}
             >
               {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
