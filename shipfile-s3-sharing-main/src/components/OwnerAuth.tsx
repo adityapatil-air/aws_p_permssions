@@ -40,7 +40,7 @@ const OwnerAuth = () => {
             <Button 
               onClick={() => signOut()}
               variant="outline" 
-              className="w-full"
+              className="w-full hover:bg-red-50 hover:border-red-300 hover:text-red-600"
             >
               Sign Out
             </Button>

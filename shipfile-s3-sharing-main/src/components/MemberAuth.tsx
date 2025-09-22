@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, User, Mail, AlertCircle, Moon, Sun } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SignIn, useUser, useClerk } from '@clerk/clerk-react';
+import { useDarkMode } from '../hooks/use-dark-mode';
 
 const MemberAuth = () => {
   const navigate = useNavigate();
@@ -21,7 +22,7 @@ const MemberAuth = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [member, setMember] = useState(null);
-  const [showEmailLogin, setShowEmailLogin] = useState(false);
+
 
 
   const handleEmailLogin = async (e) => {
@@ -165,7 +166,7 @@ const MemberAuth = () => {
                   if (isSignedIn) signOut();
                 }}
                 variant="outline" 
-                className="w-full"
+                className="w-full hover:bg-red-50 hover:border-red-300 hover:text-red-600"
               >
                 Sign Out
               </Button>
@@ -215,45 +216,24 @@ const MemberAuth = () => {
               </Alert>
             )}
             
-            {!showEmailLogin ? (
-              <div className="space-y-4">
-                <div className="w-full">
-                  <SignIn 
-                    appearance={{
-                      elements: {
-                        formButtonPrimary: 'bg-accent hover:opacity-90',
-                        card: 'shadow-none border-0',
-                        rootBox: 'w-full',
-                        formFieldInput: 'hidden',
-                        formField: 'hidden',
-                        socialButtonsBlockButton: 'w-full',
-                        socialButtonsBlockButtonText: 'text-sm font-medium',
-                      },
-                    }}
-                    fallbackRedirectUrl="/member-auth"
-                    forceRedirectUrl="/member-auth"
-                  />
-                </div>
-                
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <Separator className="w-full" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-white px-2 text-muted-foreground">Or</span>
-                  </div>
-                </div>
-                
-                <Button 
-                  onClick={() => setShowEmailLogin(true)}
-                  variant="outline" 
-                  className="w-full"
-                >
-                  Sign in with Email & Password
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-4">
+            <Tabs defaultValue="google" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="google">Google</TabsTrigger>
+                <TabsTrigger value="email">Email</TabsTrigger>
+              </TabsList>
+              <TabsContent value="google" className="mt-4">
+                <SignIn 
+                  appearance={{
+                    elements: {
+                      formButtonPrimary: 'bg-accent hover:opacity-90',
+                      card: 'shadow-none',
+                    },
+                  }}
+                  fallbackRedirectUrl="/member-auth"
+                  forceRedirectUrl="/member-auth"
+                />
+              </TabsContent>
+              <TabsContent value="email" className="mt-4">
                 <form onSubmit={handleEmailLogin} className="space-y-4">
                   <div className="space-y-2">
                     <Label>Email</Label>
@@ -277,12 +257,6 @@ const MemberAuth = () => {
                     />
                   </div>
                   
-                  {error && (
-                    <Alert variant="destructive">
-                      <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                  )}
-                  
                   <Button 
                     type="submit" 
                     disabled={loading || !email || !password}
@@ -291,16 +265,8 @@ const MemberAuth = () => {
                     {loading ? 'Signing In...' : 'Sign In'}
                   </Button>
                 </form>
-                
-                <Button 
-                  onClick={() => setShowEmailLogin(false)}
-                  variant="ghost" 
-                  className="w-full"
-                >
-                  Back to Google Login
-                </Button>
-              </div>
-            )}
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </main>

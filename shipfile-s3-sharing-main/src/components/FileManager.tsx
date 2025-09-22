@@ -196,6 +196,9 @@ export default function FileManager() {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analytics, setAnalytics] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
   const { isDarkMode, toggleDarkMode } = useDarkMode();
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
@@ -971,11 +974,12 @@ export default function FileManager() {
         return freshPermissions.viewDownload || freshPermissions.uploadViewAll;
       case 'delete':
         if (freshPermissions.deleteFiles || freshPermissions.uploadViewAll) {
-          return true; // Can delete all files
+          return true; // Can delete all files and folders
         }
         if (freshPermissions.deleteOwnFiles || freshPermissions.uploadViewOwn) {
           // Can only delete own files - check ownership
           if (!file) return true; // Allow if no specific file (bulk operations)
+          if (file.type === 'folder') return freshPermissions.createFolder; // Need create folder permission to delete folders
           console.log(`Delete permission check for ${file.name}: isOwned=${file.isOwned}`);
           return file.isOwned === true;
         }
@@ -1135,8 +1139,10 @@ export default function FileManager() {
     
     // Generate preview URL with encoded file path
     const encodedFileId = encodeURIComponent(file.id);
-    const previewUrl = `http://localhost:3001/api/preview/${currentBucket}/${encodedFileId}?userEmail=${encodeURIComponent(currentUser?.email || '')}`;
-    window.open(previewUrl, '_blank');
+    const url = `http://localhost:3001/api/preview/${currentBucket}/${encodedFileId}?userEmail=${encodeURIComponent(currentUser?.email || '')}`;
+    setPreviewFile(file);
+    setPreviewUrl(url);
+    setShowPreview(true);
   };
 
   const handleDownloadSingle = async (file) => {
@@ -2182,7 +2188,7 @@ export default function FileManager() {
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => setShowMembers(true)}>
                     <UserPlus className="h-4 w-4 mr-2" />
-                    Members
+                    Team
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => setShowLogs(true)}>
                     <FileText className="h-4 w-4 mr-2" />
@@ -2214,7 +2220,7 @@ export default function FileManager() {
               } else {
                 window.location.href = '/login';
               }
-            }}>
+            }} className="hover:bg-red-50 hover:border-red-300 hover:text-red-600">
               Sign Out
             </Button>
           </div>
