@@ -208,13 +208,13 @@ export default function FileManager() {
   React.useEffect(() => {
     const timeoutId = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
-    }, 300);
+    }, 150);
 
     return () => clearTimeout(timeoutId);
   }, [searchTerm]);
 
   // Load all files from all folders for search
-  const loadAllFiles = async () => {
+  const loadAllFiles = React.useCallback(async () => {
     if (isLoadingAllFiles || allFiles.length > 0) return;
     
     setIsLoadingAllFiles(true);
@@ -242,7 +242,7 @@ export default function FileManager() {
     } finally {
       setIsLoadingAllFiles(false);
     }
-  };
+  }, [isLoadingAllFiles, allFiles.length, currentUser?.email, currentBucket]);
 
   // Load all files when search is initiated
   React.useEffect(() => {
@@ -254,33 +254,35 @@ export default function FileManager() {
   // Use all files for search, current folder files for normal view
   const searchFiles = debouncedSearchTerm.trim().length > 0 ? allFiles : files;
   
-  const filteredFiles = searchFiles
-    .filter(file => {
-      // Case-insensitive partial matching
-      const matchesSearch = file.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
-      const matchesFilter = filterType === 'all' || 
-        (filterType === 'folders' && file.type === 'folder') ||
-        (filterType === 'images' && ['jpg', 'jpeg', 'png', 'gif'].includes(file.fileType || '')) ||
-        (filterType === 'documents' && ['pdf', 'doc', 'docx', 'txt'].includes(file.fileType || '')) ||
-        (filterType === 'videos' && ['mp4', 'avi', 'mkv'].includes(file.fileType || ''));
-      return matchesSearch && matchesFilter;
-    })
-    .sort((a, b) => {
-      // Folders always come first regardless of filter/sort
-      if (a.type === 'folder' && b.type !== 'folder') return -1;
-      if (a.type !== 'folder' && b.type === 'folder') return 1;
-      
-      // If both are folders, sort by name
-      if (a.type === 'folder' && b.type === 'folder') {
-        return a.name.localeCompare(b.name);
-      }
-      
-      // Sort files by selected criteria
-      if (sortBy === 'name') return a.name.localeCompare(b.name);
-      if (sortBy === 'date') return new Date(b.modified).getTime() - new Date(a.modified).getTime();
-      if (sortBy === 'size') return (parseFloat(b.size || '0') - parseFloat(a.size || '0'));
-      return 0;
-    });
+  const filteredFiles = React.useMemo(() => {
+    return searchFiles
+      .filter(file => {
+        // Case-insensitive partial matching
+        const matchesSearch = file.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
+        const matchesFilter = filterType === 'all' || 
+          (filterType === 'folders' && file.type === 'folder') ||
+          (filterType === 'images' && ['jpg', 'jpeg', 'png', 'gif'].includes(file.fileType || '')) ||
+          (filterType === 'documents' && ['pdf', 'doc', 'docx', 'txt'].includes(file.fileType || '')) ||
+          (filterType === 'videos' && ['mp4', 'avi', 'mkv'].includes(file.fileType || ''));
+        return matchesSearch && matchesFilter;
+      })
+      .sort((a, b) => {
+        // Folders always come first regardless of filter/sort
+        if (a.type === 'folder' && b.type !== 'folder') return -1;
+        if (a.type !== 'folder' && b.type === 'folder') return 1;
+        
+        // If both are folders, sort by name
+        if (a.type === 'folder' && b.type === 'folder') {
+          return a.name.localeCompare(b.name);
+        }
+        
+        // Sort files by selected criteria
+        if (sortBy === 'name') return a.name.localeCompare(b.name);
+        if (sortBy === 'date') return new Date(b.modified).getTime() - new Date(a.modified).getTime();
+        if (sortBy === 'size') return (parseFloat(b.size || '0') - parseFloat(a.size || '0'));
+        return 0;
+      });
+  }, [searchFiles, debouncedSearchTerm, filterType, sortBy]);
 
   const handleFileSelect = (fileId: string) => {
     setSelectedFiles(prev => 
@@ -423,7 +425,7 @@ export default function FileManager() {
     }
   };
 
-  const loadFiles = async () => {
+  const loadFiles = React.useCallback(async () => {
     try {
       const prefix = currentPath ? `${currentPath}/` : '';
       const params = new URLSearchParams();
@@ -448,18 +450,8 @@ export default function FileManager() {
       if (userEmail) params.append('userEmail', userEmail);
       
       const url = `http://localhost:3001/api/buckets/${currentBucket}/files${params.toString() ? '?' + params.toString() : ''}`;
-      console.log('=== DEBUG INFO ===');
-      console.log('currentUser state:', currentUser);
-      console.log('localStorage currentMember:', localStorage.getItem('currentMember'));
-      console.log('localStorage currentOwner:', localStorage.getItem('currentOwner'));
-      console.log('Final userEmail being sent:', userEmail);
-      console.log('Loading files from:', url);
       const response = await fetch(url);
       let data = await response.json();
-      console.log('=== FILES LOADED ===');
-      console.log('URL:', url);
-      console.log('Raw data:', data);
-      console.log('Files count:', data.length);
       
       // Get bucket info to check ownership
       let bucket = null;
@@ -539,7 +531,7 @@ export default function FileManager() {
     } catch (error) {
       console.error('Failed to load files:', error);
     }
-  };
+  }, [currentPath, currentUser?.email, currentBucket]);
   
   const checkOrganization = async () => {
     try {
@@ -643,6 +635,22 @@ export default function FileManager() {
   };
 
   // Convert simplified permissions to old format for backend
+  // Permission validation logic
+  const isValidPermissionCombination = (viewAccess, uploadAccess) => {
+    const validCombinations = {
+      'none': ['none'],                    // No View: only No Upload
+      'own': ['none', 'own'],             // View Own: No Upload OR Upload+Manage Own
+      'all': ['none', 'own', 'all']       // View All: any upload option
+    };
+    
+    return validCombinations[viewAccess]?.includes(uploadAccess) || false;
+  };
+
+  // Check if upload option should be disabled
+  const isUploadOptionDisabled = (viewAccess, uploadOption) => {
+    return !isValidPermissionCombination(viewAccess, uploadOption);
+  };
+
   const convertToOldFormat = (simplified) => {
     const old = {
       viewOnly: false,
@@ -1510,7 +1518,7 @@ export default function FileManager() {
       loadFiles();
       checkOrganization();
     }
-  }, [currentBucket, currentPath]);
+  }, [currentBucket, currentPath, loadFiles]);
 
   React.useEffect(() => {
     if (showInvite && scopeType === 'specific') {
@@ -2283,7 +2291,7 @@ export default function FileManager() {
               <select 
                 value={filterType} 
                 onChange={(e) => setFilterType(e.target.value)}
-                className="px-3 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+                className="px-3 py-1 border rounded text-sm bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
               >
                 <option value="all">All Files</option>
                 <option value="folders">Folders</option>
@@ -2294,7 +2302,7 @@ export default function FileManager() {
               <select 
                 value={sortBy} 
                 onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+                className="px-3 py-1 border rounded text-sm bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
               >
                 <option value="name">Sort by Name</option>
                 <option value="date">Sort by Date</option>
@@ -2321,7 +2329,7 @@ export default function FileManager() {
 
           {/* File List */}
           <Card className="dark:bg-gray-800 dark:border-gray-700">
-            <CardContent className="p-0">
+            <CardContent className="p-0 dark:bg-gray-800">
               {viewMode === 'list' ? (
                 <Table className="dark:text-gray-200">
                   <TableHeader className="dark:border-gray-700">
@@ -2340,10 +2348,8 @@ export default function FileManager() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredFiles.map((file) => {
-                      console.log(`Rendering file ${file.name}: isOwned=${file.isOwned}, hasRenamePermission=${hasPermission('rename', file)}`);
-                      return (
-                        <TableRow key={file.id} className="dark:border-gray-700 dark:hover:bg-gray-700">
+                    {filteredFiles.map((file) => (
+                      <TableRow key={file.id} className="dark:border-gray-700 dark:hover:bg-gray-700">
                         <TableCell>
                           <input
                             type="checkbox"
@@ -2424,9 +2430,8 @@ export default function FileManager() {
                             </Button>
                           </div>
                         </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                      </TableRow>
+                    ))}
                     {filteredFiles.length === 0 && !isLoadingAllFiles && (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center text-gray-500 py-8">
@@ -2457,15 +2462,15 @@ export default function FileManager() {
                   </TableBody>
                 </Table>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 p-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 p-4 dark:bg-gray-800">
                   {filteredFiles.map((file) => (
-                    <Card key={file.id} className="cursor-pointer hover:shadow-md">
-                      <CardContent className="p-4 text-center">
+                    <Card key={file.id} className="cursor-pointer hover:shadow-md dark:bg-gray-700 dark:border-gray-600">
+                      <CardContent className="p-4 text-center dark:bg-gray-700">
                         <div className="mb-2">
                           {getFileIcon(file.type, file.fileType)}
                         </div>
-                        <p className="text-sm truncate">{file.name}</p>
-                        <p className="text-xs text-gray-500">{file.size}</p>
+                        <p className="text-sm truncate dark:text-gray-200">{file.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{file.size}</p>
                       </CardContent>
                     </Card>
                   ))}
@@ -2482,10 +2487,10 @@ export default function FileManager() {
           <DialogHeader>
             <DialogTitle>Upload Files</DialogTitle>
           </DialogHeader>
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-8 text-center dark:bg-gray-800">
             <Upload className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-            <p className="text-lg mb-2">Drag and drop files here</p>
-            <p className="text-gray-500 mb-4">or</p>
+            <p className="text-lg mb-2 dark:text-gray-200">Drag and drop files here</p>
+            <p className="text-gray-500 dark:text-gray-400 mb-4">or</p>
             <input 
               type="file" 
               multiple 
@@ -2546,7 +2551,7 @@ export default function FileManager() {
               <select 
                 value={shareExpiry} 
                 onChange={(e) => setShareExpiry(e.target.value)}
-                className="w-full px-3 py-2 border rounded"
+                className="w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
               >
                 <option value="1">1 Hour</option>
                 <option value="24">1 Day</option>
@@ -2559,7 +2564,7 @@ export default function FileManager() {
               <div className="space-y-2">
                 <Label>Share Link</Label>
                 <div className="flex space-x-2">
-                  <Input value={shareLink} readOnly className="flex-1" />
+                  <Input value={shareLink} readOnly className="flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200" />
                   <Button onClick={copyToClipboard}>Copy</Button>
                 </div>
                 <p className="text-sm text-gray-500">
@@ -2659,12 +2664,17 @@ export default function FileManager() {
                         name="view"
                         value="none"
                         checked={invitePermissions.view === 'none'}
-                        onChange={(e) => setInvitePermissions(prev => ({
-                          ...prev, 
-                          view: e.target.value,
-                          download: false,
-                          share: false
-                        }))}
+                        onChange={(e) => {
+                          const newView = e.target.value;
+                          setInvitePermissions(prev => ({
+                            ...prev, 
+                            view: newView,
+                            // Reset upload if current combination becomes invalid
+                            upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none',
+                            download: false,
+                            share: false
+                          }));
+                        }}
                       />
                       <span className="text-sm">No View</span>
                     </label>
@@ -2675,7 +2685,15 @@ export default function FileManager() {
                         value="own"
                         checked={invitePermissions.view === 'own'}
                         disabled={!canGrantPermission('view', 'own')}
-                        onChange={(e) => setInvitePermissions(prev => ({...prev, view: e.target.value}))}
+                        onChange={(e) => {
+                          const newView = e.target.value;
+                          setInvitePermissions(prev => ({
+                            ...prev, 
+                            view: newView,
+                            // Reset upload if current combination becomes invalid
+                            upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none'
+                          }));
+                        }}
                       />
                       <span className={`text-sm ${!canGrantPermission('view', 'own') ? 'text-gray-400' : ''}`}>
                         View Own Files
@@ -2688,7 +2706,15 @@ export default function FileManager() {
                         value="all"
                         checked={invitePermissions.view === 'all'}
                         disabled={!canGrantPermission('view', 'all')}
-                        onChange={(e) => setInvitePermissions(prev => ({...prev, view: e.target.value}))}
+                        onChange={(e) => {
+                          const newView = e.target.value;
+                          setInvitePermissions(prev => ({
+                            ...prev, 
+                            view: newView,
+                            // Reset upload if current combination becomes invalid
+                            upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none'
+                          }));
+                        }}
                       />
                       <span className={`text-sm ${!canGrantPermission('view', 'all') ? 'text-gray-400' : ''}`}>
                         View All Files
@@ -2720,10 +2746,10 @@ export default function FileManager() {
                         name="upload"
                         value="own"
                         checked={invitePermissions.upload === 'own'}
-                        disabled={!canGrantPermission('upload', 'own')}
+                        disabled={isUploadOptionDisabled(invitePermissions.view, 'own') || !canGrantPermission('upload', 'own')}
                         onChange={(e) => setInvitePermissions(prev => ({...prev, upload: e.target.value}))}
                       />
-                      <span className={`text-sm ${!canGrantPermission('upload', 'own') ? 'text-gray-400' : ''}`}>
+                      <span className={`text-sm ${isUploadOptionDisabled(invitePermissions.view, 'own') || !canGrantPermission('upload', 'own') ? 'text-gray-400' : ''}`}>
                         Upload + Manage Own
                       </span>
                     </label>
@@ -2733,10 +2759,10 @@ export default function FileManager() {
                         name="upload"
                         value="all"
                         checked={invitePermissions.upload === 'all'}
-                        disabled={!canGrantPermission('upload', 'all')}
+                        disabled={isUploadOptionDisabled(invitePermissions.view, 'all') || !canGrantPermission('upload', 'all')}
                         onChange={(e) => setInvitePermissions(prev => ({...prev, upload: e.target.value}))}
                       />
-                      <span className={`text-sm ${!canGrantPermission('upload', 'all') ? 'text-gray-400' : ''}`}>
+                      <span className={`text-sm ${isUploadOptionDisabled(invitePermissions.view, 'all') || !canGrantPermission('upload', 'all') ? 'text-gray-400' : ''}`}>
                         Upload + Manage All
                       </span>
                     </label>
@@ -2835,7 +2861,7 @@ export default function FileManager() {
             {scopeType === 'specific' && (
               <div className="space-y-2">
                 <Label>Select Folders (Multi-select supported)</Label>
-                <div className="border rounded p-3">
+                <div className="border rounded p-3 dark:border-gray-600 dark:bg-gray-700">
                   <div className="max-h-48 overflow-y-auto">
                     {Object.keys(folderTree).length > 0 ? (
                       <FolderTreeNode 
@@ -2848,19 +2874,19 @@ export default function FileManager() {
                         isChildOfSelected={isChildOfSelected}
                       />
                     ) : (
-                      <p className="text-sm text-gray-500">No folders found</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">No folders found</p>
                     )}
                   </div>
                   
                   {selectedFolderPaths.size > 0 && (
-                    <div className="mt-3 p-2 bg-blue-50 rounded">
-                      <span className="text-sm font-medium">Selected paths: </span>
+                    <div className="mt-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded">
+                      <span className="text-sm font-medium dark:text-gray-200">Selected paths: </span>
                       <div className="mt-1 space-y-1">
                         {Array.from(selectedFolderPaths).map(path => (
-                          <div key={path} className="text-sm text-blue-600">/{path}</div>
+                          <div key={path} className="text-sm text-blue-600 dark:text-blue-400">/{path}</div>
                         ))}
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                         Each selected folder includes all its subfolders and files
                       </p>
                     </div>
@@ -3032,7 +3058,17 @@ export default function FileManager() {
                       name="editView"
                       value="none"
                       checked={editPermissions.view === 'none'}
-                      onChange={(e) => setEditPermissions(prev => ({...prev, view: e.target.value, download: false, share: false}))}
+                      onChange={(e) => {
+                        const newView = e.target.value;
+                        setEditPermissions(prev => ({
+                          ...prev, 
+                          view: newView,
+                          // Reset upload if current combination becomes invalid
+                          upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none',
+                          download: false, 
+                          share: false
+                        }));
+                      }}
                     />
                     <span className="text-sm">No View</span>
                   </label>
@@ -3042,7 +3078,15 @@ export default function FileManager() {
                       name="editView"
                       value="own"
                       checked={editPermissions.view === 'own'}
-                      onChange={(e) => setEditPermissions(prev => ({...prev, view: e.target.value}))}
+                      onChange={(e) => {
+                        const newView = e.target.value;
+                        setEditPermissions(prev => ({
+                          ...prev, 
+                          view: newView,
+                          // Reset upload if current combination becomes invalid
+                          upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none'
+                        }));
+                      }}
                     />
                     <span className="text-sm">View Own Files</span>
                   </label>
@@ -3052,7 +3096,15 @@ export default function FileManager() {
                       name="editView"
                       value="all"
                       checked={editPermissions.view === 'all'}
-                      onChange={(e) => setEditPermissions(prev => ({...prev, view: e.target.value}))}
+                      onChange={(e) => {
+                        const newView = e.target.value;
+                        setEditPermissions(prev => ({
+                          ...prev, 
+                          view: newView,
+                          // Reset upload if current combination becomes invalid
+                          upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none'
+                        }));
+                      }}
                     />
                     <span className="text-sm">View All Files</span>
                   </label>
@@ -3078,9 +3130,12 @@ export default function FileManager() {
                       name="editUpload"
                       value="own"
                       checked={editPermissions.upload === 'own'}
+                      disabled={isUploadOptionDisabled(editPermissions.view, 'own')}
                       onChange={(e) => setEditPermissions(prev => ({...prev, upload: e.target.value}))}
                     />
-                    <span className="text-sm">Upload + Manage Own</span>
+                    <span className={`text-sm ${isUploadOptionDisabled(editPermissions.view, 'own') ? 'text-gray-400' : ''}`}>
+                      Upload + Manage Own
+                    </span>
                   </label>
                   <label className="flex items-center space-x-2">
                     <input
@@ -3088,9 +3143,12 @@ export default function FileManager() {
                       name="editUpload"
                       value="all"
                       checked={editPermissions.upload === 'all'}
+                      disabled={isUploadOptionDisabled(editPermissions.view, 'all')}
                       onChange={(e) => setEditPermissions(prev => ({...prev, upload: e.target.value}))}
                     />
-                    <span className="text-sm">Upload + Manage All</span>
+                    <span className={`text-sm ${isUploadOptionDisabled(editPermissions.view, 'all') ? 'text-gray-400' : ''}`}>
+                      Upload + Manage All
+                    </span>
                   </label>
                 </div>
               </div>

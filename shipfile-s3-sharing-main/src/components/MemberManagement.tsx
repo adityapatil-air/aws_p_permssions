@@ -122,6 +122,22 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     return 'Unknown';
   };
 
+  // Permission validation logic
+  const isValidPermissionCombination = (viewAccess: string, uploadAccess: string) => {
+    const validCombinations: Record<string, string[]> = {
+      'none': ['none'],                    // No View: only No Upload
+      'own': ['none', 'own'],             // View Own: No Upload OR Upload+Manage Own
+      'all': ['none', 'own', 'all']       // View All: any upload option
+    };
+    
+    return validCombinations[viewAccess]?.includes(uploadAccess) || false;
+  };
+
+  // Check if upload option should be disabled
+  const isUploadOptionDisabled = (viewAccess: string, uploadOption: string) => {
+    return !isValidPermissionCombination(viewAccess, uploadOption);
+  };
+
   const convertToOldFormat = (simplified: any) => {
     const old = {
       viewOnly: false,
@@ -378,7 +394,17 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                       name="editView"
                       value="none"
                       checked={editPermissions.view === 'none'}
-                      onChange={(e) => setEditPermissions(prev => ({...prev, view: e.target.value, download: false, share: false}))}
+                      onChange={(e) => {
+                        const newView = e.target.value;
+                        setEditPermissions(prev => ({
+                          ...prev, 
+                          view: newView,
+                          // Reset upload if current combination becomes invalid
+                          upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none',
+                          download: false, 
+                          share: false
+                        }));
+                      }}
                     />
                     <span className="text-sm">No View</span>
                   </label>
@@ -388,7 +414,15 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                       name="editView"
                       value="own"
                       checked={editPermissions.view === 'own'}
-                      onChange={(e) => setEditPermissions(prev => ({...prev, view: e.target.value}))}
+                      onChange={(e) => {
+                        const newView = e.target.value;
+                        setEditPermissions(prev => ({
+                          ...prev, 
+                          view: newView,
+                          // Reset upload if current combination becomes invalid
+                          upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none'
+                        }));
+                      }}
                     />
                     <span className="text-sm">View Own Files</span>
                   </label>
@@ -398,7 +432,15 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                       name="editView"
                       value="all"
                       checked={editPermissions.view === 'all'}
-                      onChange={(e) => setEditPermissions(prev => ({...prev, view: e.target.value}))}
+                      onChange={(e) => {
+                        const newView = e.target.value;
+                        setEditPermissions(prev => ({
+                          ...prev, 
+                          view: newView,
+                          // Reset upload if current combination becomes invalid
+                          upload: isValidPermissionCombination(newView, prev.upload) ? prev.upload : 'none'
+                        }));
+                      }}
                     />
                     <span className="text-sm">View All Files</span>
                   </label>
@@ -424,9 +466,12 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                       name="editUpload"
                       value="own"
                       checked={editPermissions.upload === 'own'}
+                      disabled={isUploadOptionDisabled(editPermissions.view, 'own')}
                       onChange={(e) => setEditPermissions(prev => ({...prev, upload: e.target.value}))}
                     />
-                    <span className="text-sm">Upload + Manage Own</span>
+                    <span className={`text-sm ${isUploadOptionDisabled(editPermissions.view, 'own') ? 'text-gray-400' : ''}`}>
+                      Upload + Manage Own
+                    </span>
                   </label>
                   <label className="flex items-center space-x-2">
                     <input
@@ -434,9 +479,12 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
                       name="editUpload"
                       value="all"
                       checked={editPermissions.upload === 'all'}
+                      disabled={isUploadOptionDisabled(editPermissions.view, 'all')}
                       onChange={(e) => setEditPermissions(prev => ({...prev, upload: e.target.value}))}
                     />
-                    <span className="text-sm">Upload + Manage All</span>
+                    <span className={`text-sm ${isUploadOptionDisabled(editPermissions.view, 'all') ? 'text-gray-400' : ''}`}>
+                      Upload + Manage All
+                    </span>
                   </label>
                 </div>
               </div>
