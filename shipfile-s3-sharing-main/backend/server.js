@@ -18,7 +18,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: [process.env.FRONTEND_URL || 'http://localhost:8080', 'https://shipfile.netlify.app'],
+  credentials: true
+}));
 app.use(express.json());
 
 // Database setup
