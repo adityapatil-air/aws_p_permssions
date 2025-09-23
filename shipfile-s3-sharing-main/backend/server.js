@@ -5,7 +5,8 @@ import { S3Client, CreateBucketCommand, ListObjectsV2Command, PutBucketCorsComma
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import archiver from 'archiver';
-import sqlite3 from 'sqlite3';
+import pkg from 'pg';
+const { Pool } = pkg;
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { Readable } from 'stream';
@@ -25,95 +26,95 @@ app.use(cors({
 app.use(express.json());
 
 // Database setup
-const db = new sqlite3.Database(join(__dirname, 'shipfile.db'));
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS buckets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    region TEXT,
-    access_key TEXT,
-    secret_key TEXT,
-    owner_email TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(name, owner_email)
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS shares (
-    id TEXT PRIMARY KEY,
-    bucket_name TEXT,
-    items TEXT,
-    permissions TEXT,
-    expires_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    revoked BOOLEAN DEFAULT 0
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS organizations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    bucket_name TEXT UNIQUE,
-    name TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS invitations (
-    id TEXT PRIMARY KEY,
-    bucket_name TEXT,
-    email TEXT,
-    permissions TEXT,
-    scope_type TEXT,
-    scope_folders TEXT,
-    expires_at DATETIME,
-    created_by TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    accepted BOOLEAN DEFAULT 0
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE,
-    password TEXT,
-    bucket_name TEXT,
-    permissions TEXT,
-    scope_type TEXT,
-    scope_folders TEXT,
-    invited_by TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS file_ownership (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    bucket_name TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    owner_email TEXT NOT NULL,
-    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(bucket_name, file_path)
-  )`);
-  
-  // Create activity logs table
-  db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    bucket_name TEXT NOT NULL,
-    user_email TEXT NOT NULL,
-    action TEXT NOT NULL,
-    resource_path TEXT NOT NULL,
-    old_name TEXT,
-    details TEXT,
-    timestamp DATETIME NOT NULL
-  )`);
-  
-  // Add missing columns to existing tables
-  db.run(`ALTER TABLE members ADD COLUMN invited_by TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.log('Column invited_by already exists or other error:', err.message);
-    }
-  });
-  
-  db.run(`ALTER TABLE invitations ADD COLUMN created_by TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.log('Column created_by already exists or other error:', err.message);
-    }
-  });
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
+
+// Initialize database tables
+const initDB = async () => {
+  try {
+    await db.query(`CREATE TABLE IF NOT EXISTS buckets (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      region TEXT,
+      access_key TEXT,
+      secret_key TEXT,
+      owner_email TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(name, owner_email)
+    )`);
+    
+    await db.query(`CREATE TABLE IF NOT EXISTS shares (
+      id TEXT PRIMARY KEY,
+      bucket_name TEXT,
+      items TEXT,
+      permissions TEXT,
+      expires_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      revoked BOOLEAN DEFAULT FALSE
+    )`);
+    
+    await db.query(`CREATE TABLE IF NOT EXISTS organizations (
+      id SERIAL PRIMARY KEY,
+      bucket_name TEXT UNIQUE,
+      name TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    await db.query(`CREATE TABLE IF NOT EXISTS invitations (
+      id TEXT PRIMARY KEY,
+      bucket_name TEXT,
+      email TEXT,
+      permissions TEXT,
+      scope_type TEXT,
+      scope_folders TEXT,
+      expires_at TIMESTAMP,
+      created_by TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      accepted BOOLEAN DEFAULT FALSE
+    )`);
+    
+    await db.query(`CREATE TABLE IF NOT EXISTS members (
+      id SERIAL PRIMARY KEY,
+      email TEXT,
+      password TEXT,
+      bucket_name TEXT,
+      permissions TEXT,
+      scope_type TEXT,
+      scope_folders TEXT,
+      invited_by TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(email, bucket_name)
+    )`);
+    
+    await db.query(`CREATE TABLE IF NOT EXISTS file_ownership (
+      id SERIAL PRIMARY KEY,
+      bucket_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      owner_email TEXT NOT NULL,
+      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(bucket_name, file_path)
+    )`);
+    
+    await db.query(`CREATE TABLE IF NOT EXISTS activity_logs (
+      id SERIAL PRIMARY KEY,
+      bucket_name TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      action TEXT NOT NULL,
+      resource_path TEXT NOT NULL,
+      old_name TEXT,
+      details TEXT,
+      timestamp TIMESTAMP NOT NULL
+    )`);
+    
+    console.log('Database tables initialized');
+  } catch (error) {
+    console.error('Database initialization error:', error);
+  }
+};
+
+initDB();
 
 // Email transporter setup
 const transporter = nodemailer.createTransport({
@@ -371,24 +372,23 @@ app.post('/api/buckets', async (req, res) => {
 
     await s3Client.send(corsCommand);
 
-    db.run(
-      'INSERT INTO buckets (name, region, access_key, secret_key, owner_email) VALUES (?, ?, ?, ?, ?)',
-      [bucketName, region, accessKey, secretKey, ownerEmail],
-      function(err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ error: 'You already have a bucket with this name. Please choose a different name.' });
-          }
-          return res.status(500).json({ error: 'Database error: ' + err.message });
-        }
-        res.json({ 
-          id: this.lastID,
-          name: bucketName,
-          region,
-          created: new Date().toISOString().split('T')[0]
-        });
+    try {
+      const result = await db.query(
+        'INSERT INTO buckets (name, region, access_key, secret_key, owner_email) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [bucketName, region, accessKey, secretKey, ownerEmail]
+      );
+      res.json({ 
+        id: result.rows[0].id,
+        name: bucketName,
+        region,
+        created: new Date().toISOString().split('T')[0]
+      });
+    } catch (err) {
+      if (err.code === '23505') { // PostgreSQL unique constraint error
+        return res.status(400).json({ error: 'You already have a bucket with this name. Please choose a different name.' });
       }
-    );
+      return res.status(500).json({ error: 'Database error: ' + err.message });
+    }
 
   } catch (error) {
     res.status(400).json({ 
@@ -400,15 +400,18 @@ app.post('/api/buckets', async (req, res) => {
 });
 
 // Get bucket info
-app.get('/api/buckets/:bucketName/info', (req, res) => {
+app.get('/api/buckets/:bucketName/info', async (req, res) => {
   const { bucketName } = req.params;
   
-  db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
-    if (err || !bucket) {
+  try {
+    const result = await db.query('SELECT owner_email FROM buckets WHERE name = $1', [bucketName]);
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Bucket not found' });
     }
-    res.json({ owner_email: bucket.owner_email });
-  });
+    res.json({ owner_email: result.rows[0].owner_email });
+  } catch (err) {
+    return res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Get buckets for owner
