@@ -127,26 +127,25 @@ const transporter = nodemailer.createTransport({
 });
 
 // Helper function to log activities
-const logActivity = (bucketName, userEmail, action, resourcePath, oldName = null, details = null) => {
+const logActivity = async (bucketName, userEmail, action, resourcePath, oldName = null, details = null) => {
   const timestamp = new Date().toISOString();
-  db.run(
-    'INSERT INTO activity_logs (bucket_name, user_email, action, resource_path, old_name, details, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [bucketName, userEmail, action, resourcePath, oldName, details, timestamp],
-    function(err) {
-      if (err) {
-        console.error('Error logging activity:', err);
-      } else {
-        console.log(`Activity logged: ${userEmail} ${action} ${resourcePath} at ${timestamp}`);
-      }
-    }
-  );
+  try {
+    await db.query(
+      'INSERT INTO activity_logs (bucket_name, user_email, action, resource_path, old_name, details, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [bucketName, userEmail, action, resourcePath, oldName, details, timestamp]
+    );
+    console.log(`Activity logged: ${userEmail} ${action} ${resourcePath} at ${timestamp}`);
+  } catch (err) {
+    console.error('Error logging activity:', err);
+  }
 };
 
 // Helper function to check if user has access to specific files/folders
 const checkFolderAccess = (userEmail, bucketName, items) => {
   return new Promise((resolve, reject) => {
-    db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
-      if (err || !bucket) {
+    db.query('SELECT owner_email FROM buckets WHERE name = $1', [bucketName]).then(result => {
+      const bucket = result.rows[0];
+      if (!bucket) {
         return reject(new Error('Bucket not found'));
       }
       
@@ -156,10 +155,12 @@ const checkFolderAccess = (userEmail, bucketName, items) => {
       }
       
       // Check member permissions
-      db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, member) => {
-        if (err || !member) {
-          return reject(new Error('Access denied'));
-        }
+      return db.query('SELECT scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+    }).then(result => {
+      const member = result.rows[0];
+      if (!member) {
+        return reject(new Error('Access denied'));
+      }
         
         // If scope_type is 'entire' or undefined, allow access
         if (!member.scope_type || member.scope_type === 'entire') {
@@ -192,8 +193,9 @@ const checkFolderAccess = (userEmail, bucketName, items) => {
           }
         }
         
-        resolve(true);
-      });
+      resolve(true);
+    }).catch(err => {
+      reject(err);
     });
   });
 };
@@ -256,15 +258,17 @@ const isSubset = (inviterPerms, inviteePerms) => {
 
 // Permission checking middleware
 const checkPermission = (action) => {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const { bucketName, userEmail, items } = req.body;
     
     if (!userEmail) {
       return res.status(401).json({ error: 'User email required' });
     }
     
-    db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
-      if (err || !bucket) {
+    try {
+      const bucketResult = await db.query('SELECT owner_email FROM buckets WHERE name = $1', [bucketName]);
+      const bucket = bucketResult.rows[0];
+      if (!bucket) {
         return res.status(404).json({ error: 'Bucket not found' });
       }
       
@@ -272,58 +276,64 @@ const checkPermission = (action) => {
         return next();
       }
       
-      db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, member) => {
-        if (err || !member) {
-          return res.status(403).json({ error: `You do not have permission to perform ${action.toUpperCase()} on this bucket. Please contact the owner for access.` });
-        }
-        
-        const permissions = JSON.parse(member.permissions);
-        let hasPermission = false;
-        
-        switch (action) {
-          case 'download':
-            hasPermission = permissions.viewDownload || permissions.uploadViewAll;
-            break;
-          case 'delete':
-            hasPermission = permissions.deleteFiles || permissions.deleteOwnFiles;
-            break;
-          case 'deleteOwn':
-            hasPermission = permissions.deleteOwnFiles;
-            break;
-          case 'share':
-            hasPermission = permissions.generateLinks;
-            break;
-          case 'createFolder':
-            hasPermission = permissions.createFolder;
-            break;
-          case 'invite':
-            hasPermission = permissions.inviteMembers;
-            break;
-        }
-        
-        if (!hasPermission) {
-          let errorMsg = `You do not have permission to perform ${action.toUpperCase()} on this bucket. Please contact the owner for access.`;
-          if (action === 'invite') {
-            errorMsg = 'You do not have permission to invite members. Please contact the owner for access.';
-          }
-          return res.status(403).json({ error: errorMsg });
-        }
-        
-        // For invite action, store member permissions for validation
+      const memberResult = await db.query('SELECT permissions, scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+      const member = memberResult.rows[0];
+      if (!member) {
+        return res.status(403).json({ error: `You do not have permission to perform ${action.toUpperCase()} on this bucket. Please contact the owner for access.` });
+      }
+      
+      const permissions = JSON.parse(member.permissions);
+      let hasPermission = false;
+      
+      switch (action) {
+        case 'download':
+          hasPermission = permissions.viewDownload || permissions.uploadViewAll;
+          break;
+        case 'delete':
+          hasPermission = permissions.deleteFiles || permissions.deleteOwnFiles;
+          break;
+        case 'deleteOwn':
+          hasPermission = permissions.deleteOwnFiles;
+          break;
+        case 'share':
+          hasPermission = permissions.generateLinks;
+          break;
+        case 'createFolder':
+          hasPermission = permissions.createFolder;
+          break;
+        case 'invite':
+          hasPermission = permissions.inviteMembers;
+          break;
+      }
+      
+      if (!hasPermission) {
+        let errorMsg = `You do not have permission to perform ${action.toUpperCase()} on this bucket. Please contact the owner for access.`;
         if (action === 'invite') {
-          req.memberPermissions = { permissions, scopeType: member.scope_type, scopeFolders: JSON.parse(member.scope_folders || '[]') };
+          errorMsg = 'You do not have permission to invite members. Please contact the owner for access.';
         }
-        
-        // For operations that involve specific files/folders, check folder access
-        if (items && items.length > 0) {
-          checkFolderAccess(userEmail, bucketName, items)
-            .then(() => next())
-            .catch(error => res.status(403).json({ error: error.message }));
-        } else {
+        return res.status(403).json({ error: errorMsg });
+      }
+      
+      // For invite action, store member permissions for validation
+      if (action === 'invite') {
+        req.memberPermissions = { permissions, scopeType: member.scope_type, scopeFolders: JSON.parse(member.scope_folders || '[]') };
+      }
+      
+      // For operations that involve specific files/folders, check folder access
+      if (items && items.length > 0) {
+        try {
+          await checkFolderAccess(userEmail, bucketName, items);
           next();
+        } catch (error) {
+          res.status(403).json({ error: error.message });
         }
-      });
-    });
+      } else {
+        next();
+      }
+    } catch (err) {
+      console.error('Permission check error:', err);
+      res.status(500).json({ error: 'Database error' });
+    }
   };
 };
 
@@ -415,57 +425,47 @@ app.get('/api/buckets/:bucketName/info', async (req, res) => {
 });
 
 // Get buckets for owner
-app.get('/api/buckets', (req, res) => {
+app.get('/api/buckets', async (req, res) => {
   const { ownerEmail } = req.query;
   
   if (!ownerEmail) {
     return res.status(400).json({ error: 'Owner email is required' });
   }
   
-  db.all('SELECT id, name, region, created_at FROM buckets WHERE owner_email = ?', [ownerEmail], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+  try {
+    const result = await db.query('SELECT id, name, region, created_at FROM buckets WHERE owner_email = $1', [ownerEmail]);
+    const rows = result.rows;
     
-    const buckets = rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      region: row.region,
-      created: row.created_at.split(' ')[0]
+    const buckets = await Promise.all(rows.map(async (row) => {
+      const memberResult = await db.query('SELECT COUNT(*) as count FROM members WHERE bucket_name = $1', [row.name]);
+      return {
+        id: row.id,
+        name: row.name,
+        region: row.region,
+        created: row.created_at.toISOString().split('T')[0],
+        userCount: parseInt(memberResult.rows[0].count)
+      };
     }));
     
-    // Get member count for each bucket
-    let completed = 0;
-    buckets.forEach((bucket, index) => {
-      db.get('SELECT COUNT(*) as count FROM members WHERE bucket_name = ?', [bucket.name], (err, result) => {
-        buckets[index].userCount = result ? result.count : 0;
-        completed++;
-        if (completed === buckets.length) {
-          res.json(buckets);
-        }
-      });
-    });
-    
-    if (buckets.length === 0) {
-      res.json(buckets);
-    }
-  });
+    res.json(buckets);
+  } catch (err) {
+    console.error('Database error:', err);
+    return res.status(500).json({ error: 'Database error: ' + err.message });
+  }
 });
 
 // Get buckets for member
-app.get('/api/member/buckets', (req, res) => {
+app.get('/api/member/buckets', async (req, res) => {
   const { memberEmail } = req.query;
   
   if (!memberEmail) {
     return res.status(400).json({ error: 'Member email is required' });
   }
   
-  db.all('SELECT bucket_name, permissions, scope_type, scope_folders FROM members WHERE email = ?', [memberEmail], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+  try {
+    const result = await db.query('SELECT bucket_name, permissions, scope_type, scope_folders FROM members WHERE email = $1', [memberEmail]);
     
-    const buckets = rows.map(row => ({
+    const buckets = result.rows.map(row => ({
       bucketName: row.bucket_name,
       permissions: row.permissions,
       scopeType: row.scope_type,
@@ -473,7 +473,10 @@ app.get('/api/member/buckets', (req, res) => {
     }));
     
     res.json(buckets);
-  });
+  } catch (err) {
+    console.error('Database error:', err);
+    return res.status(500).json({ error: 'Database error: ' + err.message });
+  }
 });
 
 // Generate pre-signed upload URL
@@ -481,77 +484,71 @@ app.post('/api/upload-url', async (req, res) => {
   const { bucketName, fileName, fileType, folderPath = '', userEmail } = req.body;
 
   try {
-    db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], async (err, row) => {
-      if (err || !row) {
-        return res.status(404).json({ error: 'Bucket not found' });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const row = bucketResult.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+    
+    // Check permissions if not owner
+    if (row.owner_email !== userEmail) {
+      const memberResult = await db.query('SELECT permissions, scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+      const member = memberResult.rows[0];
+      if (!member) {
+        return res.status(403).json({ error: 'You do not have permission to perform UPLOAD on this bucket. Please contact the owner for access.' });
       }
       
-      // Check permissions if not owner
-      if (row.owner_email !== userEmail) {
-        db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], async (err, member) => {
-          if (err || !member) {
-            return res.status(403).json({ error: 'You do not have permission to perform UPLOAD on this bucket. Please contact the owner for access.' });
-          }
-          
-          const permissions = JSON.parse(member.permissions);
-          if (!permissions.uploadOnly && !permissions.uploadViewOwn && !permissions.uploadViewAll) {
-            return res.status(403).json({ error: 'You do not have permission to perform UPLOAD on this bucket. Please contact the owner for access.' });
-          }
-          
-          // Check folder access for upload
-          if (folderPath) {
-            try {
-              await checkFolderAccess(userEmail, bucketName, [{ key: folderPath }]);
-            } catch (error) {
-              console.log('Upload folder access denied:', error.message);
-              return res.status(403).json({ error: error.message });
-            }
-          }
-          
-          generateUploadUrl();
-        });
-        return;
+      const permissions = JSON.parse(member.permissions);
+      if (!permissions.uploadOnly && !permissions.uploadViewOwn && !permissions.uploadViewAll) {
+        return res.status(403).json({ error: 'You do not have permission to perform UPLOAD on this bucket. Please contact the owner for access.' });
       }
       
-      generateUploadUrl();
-      
-      async function generateUploadUrl() {
-        const s3Client = new S3Client({
-          region: row.region,
-          credentials: {
-            accessKeyId: row.access_key,
-            secretAccessKey: row.secret_key,
-          },
-        });
-
-        // Ensure proper folder path construction
-        let s3Key;
-        if (folderPath && folderPath.trim()) {
-          // Remove any trailing slashes and ensure proper path
-          const cleanFolderPath = folderPath.replace(/\/+$/, '');
-          s3Key = `${cleanFolderPath}/${fileName}`;
-        } else {
-          s3Key = fileName;
+      // Check folder access for upload
+      if (folderPath) {
+        try {
+          await checkFolderAccess(userEmail, bucketName, [{ key: folderPath }]);
+        } catch (error) {
+          console.log('Upload folder access denied:', error.message);
+          return res.status(403).json({ error: error.message });
         }
-        
-        console.log('Upload S3 Key:', s3Key);
-        console.log('Folder Path:', folderPath);
-
-        const command = new PutObjectCommand({
-          Bucket: bucketName,
-          Key: s3Key,
-        });
-
-        const signedUrl = await getSignedUrl(s3Client, command, { 
-          expiresIn: 3600,
-          unhoistableHeaders: new Set(['content-type'])
-        });
-        res.json({ uploadUrl: signedUrl });
       }
+    }
+    
+    const s3Client = new S3Client({
+      region: row.region,
+      credentials: {
+        accessKeyId: row.access_key,
+        secretAccessKey: row.secret_key,
+      },
     });
 
+    // Ensure proper folder path construction
+    let s3Key;
+    if (folderPath && folderPath.trim()) {
+      // Remove any trailing slashes and ensure proper path
+      const cleanFolderPath = folderPath.replace(/\/+$/, '');
+      s3Key = `${cleanFolderPath}/${fileName}`;
+    } else {
+      s3Key = fileName;
+    }
+    
+    console.log('Upload S3 Key:', s3Key);
+    console.log('Folder Path:', folderPath);
+
+    const command = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: s3Key,
+    });
+
+    const signedUrl = await getSignedUrl(s3Client, command, { 
+      expiresIn: 3600,
+      unhoistableHeaders: new Set(['content-type'])
+    });
+    res.json({ uploadUrl: signedUrl });
+
   } catch (error) {
-    res.status(500).json({ error: 'Failed to generate upload URL' });
+    console.error('Upload URL generation error:', error);
+    res.status(500).json({ error: 'Failed to generate upload URL: ' + error.message });
   }
 });
 
@@ -560,37 +557,38 @@ app.post('/api/folders', checkPermission('createFolder'), async (req, res) => {
   const { bucketName, folderName, currentPath = '', userEmail } = req.body;
 
   try {
-    db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], async (err, row) => {
-      if (err || !row) {
-        return res.status(404).json({ error: 'Bucket not found' });
-      }
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const row = bucketResult.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
 
-      const s3Client = new S3Client({
-        region: row.region,
-        credentials: {
-          accessKeyId: row.access_key,
-          secretAccessKey: row.secret_key,
-        },
-      });
-
-      const folderKey = currentPath ? `${currentPath}/${folderName}/` : `${folderName}/`;
-      
-      const command = new PutObjectCommand({
-        Bucket: bucketName,
-        Key: folderKey,
-        Body: '',
-      });
-
-      await s3Client.send(command);
-      
-      // Log folder creation
-      logActivity(bucketName, userEmail, 'create_folder', folderKey);
-      
-      res.json({ success: true, folderPath: folderKey });
+    const s3Client = new S3Client({
+      region: row.region,
+      credentials: {
+        accessKeyId: row.access_key,
+        secretAccessKey: row.secret_key,
+      },
     });
 
+    const folderKey = currentPath ? `${currentPath}/${folderName}/` : `${folderName}/`;
+    
+    const command = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: folderKey,
+      Body: '',
+    });
+
+    await s3Client.send(command);
+    
+    // Log folder creation
+    await logActivity(bucketName, userEmail, 'create_folder', folderKey);
+    
+    res.json({ success: true, folderPath: folderKey });
+
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create folder' });
+    console.error('Create folder error:', error);
+    res.status(500).json({ error: 'Failed to create folder: ' + error.message });
   }
 });
 
@@ -600,12 +598,8 @@ app.get('/api/buckets/:bucketName/files/all', async (req, res) => {
   const { userEmail } = req.query;
 
   try {
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const bucket = bucketResult.rows[0];
 
     if (!bucket) {
       return res.status(404).json({ error: 'Bucket not found' });
@@ -689,11 +683,8 @@ app.get('/api/buckets/:bucketName/files/all', async (req, res) => {
 
     // Apply permission filtering
     if (userEmail && bucket.owner_email !== userEmail) {
-      const member = await new Promise((resolve) => {
-        db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
-          resolve(row);
-        });
-      });
+      const memberResult = await db.query('SELECT scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+      const member = memberResult.rows[0];
 
       if (member && member.scope_type === 'specific') {
         const allowedFolders = JSON.parse(member.scope_folders || '[]');
@@ -724,12 +715,8 @@ app.get('/api/buckets/:bucketName/files', async (req, res) => {
 
   try {
     // Get bucket info
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const bucket = bucketResult.rows[0];
 
     if (!bucket) {
       return res.status(404).json({ error: 'Bucket not found' });
@@ -792,11 +779,8 @@ app.get('/api/buckets/:bucketName/files', async (req, res) => {
 
     // If no userEmail, check if there are any members for this bucket
     if (!userEmail) {
-      const memberCount = await new Promise((resolve) => {
-        db.get('SELECT COUNT(*) as count FROM members WHERE bucket_name = ?', [bucketName], (err, result) => {
-          resolve(result ? result.count : 0);
-        });
-      });
+      const memberCountResult = await db.query('SELECT COUNT(*) as count FROM members WHERE bucket_name = $1', [bucketName]);
+      const memberCount = parseInt(memberCountResult.rows[0].count);
       
       // If no members exist, treat as owner access
       if (memberCount === 0) {
@@ -808,12 +792,8 @@ app.get('/api/buckets/:bucketName/files', async (req, res) => {
     }
 
     // Check member permissions
-    const member = await new Promise((resolve, reject) => {
-      db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const memberResult = await db.query('SELECT scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+    const member = memberResult.rows[0];
 
     if (!member) {
       return res.status(403).json({ error: 'Access denied' });
@@ -923,12 +903,8 @@ app.get('/api/preview/:bucketName/*', async (req, res) => {
   const { userEmail } = req.query;
 
   try {
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const bucket = bucketResult.rows[0];
 
     if (!bucket) {
       return res.status(404).send('Bucket not found');
@@ -936,11 +912,8 @@ app.get('/api/preview/:bucketName/*', async (req, res) => {
 
     // Basic permission check - if userEmail provided, verify access
     if (userEmail && bucket.owner_email !== userEmail) {
-      const member = await new Promise((resolve) => {
-        db.get('SELECT permissions FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
-          resolve(row);
-        });
-      });
+      const memberResult = await db.query('SELECT permissions FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+      const member = memberResult.rows[0];
       
       if (!member) {
         return res.status(403).send('Access denied');
@@ -975,18 +948,19 @@ app.post('/api/download', checkPermission('download'), async (req, res) => {
   const { bucketName, items, userEmail } = req.body;
 
   try {
-    db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], async (err, row) => {
-      if (err || !row) {
-        return res.status(404).json({ error: 'Bucket not found' });
-      }
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const row = bucketResult.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
 
-      const s3Client = new S3Client({
-        region: row.region,
-        credentials: {
-          accessKeyId: row.access_key,
-          secretAccessKey: row.secret_key,
-        },
-      });
+    const s3Client = new S3Client({
+      region: row.region,
+      credentials: {
+        accessKeyId: row.access_key,
+        secretAccessKey: row.secret_key,
+      },
+    });
 
       if (items.length === 1 && items[0].type === 'file') {
         const fileKey = items[0].key;
@@ -1037,10 +1011,10 @@ app.post('/api/download', checkPermission('download'), async (req, res) => {
         
         archive.finalize();
       }
-    });
 
   } catch (error) {
-    res.status(500).json({ error: 'Download failed' });
+    console.error('Download error:', error);
+    res.status(500).json({ error: 'Download failed: ' + error.message });
   }
 });
 
@@ -1049,18 +1023,19 @@ app.post('/api/share', checkPermission('share'), async (req, res) => {
   const { bucketName, items, shareType, expiryHours, userEmail } = req.body;
 
   try {
-    db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], async (err, row) => {
-      if (err || !row) {
-        return res.status(404).json({ error: 'Bucket not found' });
-      }
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const row = bucketResult.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
 
-      const s3Client = new S3Client({
-        region: row.region,
-        credentials: {
-          accessKeyId: row.access_key,
-          secretAccessKey: row.secret_key,
-        },
-      });
+    const s3Client = new S3Client({
+      region: row.region,
+      credentials: {
+        accessKeyId: row.access_key,
+        secretAccessKey: row.secret_key,
+      },
+    });
 
       const expiresIn = shareType === 'limited' ? expiryHours * 3600 : 604800;
       
@@ -1074,7 +1049,7 @@ app.post('/api/share', checkPermission('share'), async (req, res) => {
         const shareUrl = await getSignedUrl(s3Client, command, { expiresIn });
         
         // Log share activity
-        logActivity(bucketName, userEmail, 'share', fileKey, null, `${shareType} - ${expiryHours}h`);
+        await logActivity(bucketName, userEmail, 'share', fileKey, null, `${shareType} - ${expiryHours}h`);
         
         res.json({ shareUrl });
       } else {
@@ -1084,28 +1059,28 @@ app.post('/api/share', checkPermission('share'), async (req, res) => {
         // Check if sharing a single folder
         const isSingleFolder = items.length === 1 && items[0].type === 'folder';
         
-        db.run(
-          'INSERT INTO shares (id, bucket_name, items, permissions, expires_at) VALUES (?, ?, ?, ?, ?)',
-          [shareId, bucketName, JSON.stringify(items), 'read', expiresAt],
-          function(err) {
-            if (err) {
-              return res.status(500).json({ error: 'Database error' });
-            }
-            
-            const shareUrl = `http://localhost:3001/api/share/${shareId}`;
-            
-            // Log share activity for multiple items
-            const resourcePath = items.length === 1 ? items[0].key : `${items.length} items`;
-            logActivity(bucketName, userEmail, 'share', resourcePath, null, `${shareType} - ${expiryHours}h`);
-            
-            res.json({ shareUrl });
-          }
-        );
+        try {
+          await db.query(
+            'INSERT INTO shares (id, bucket_name, items, permissions, expires_at) VALUES ($1, $2, $3, $4, $5)',
+            [shareId, bucketName, JSON.stringify(items), 'read', expiresAt]
+          );
+          
+          const shareUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/api/share/${shareId}`;
+          
+          // Log share activity for multiple items
+          const resourcePath = items.length === 1 ? items[0].key : `${items.length} items`;
+          await logActivity(bucketName, userEmail, 'share', resourcePath, null, `${shareType} - ${expiryHours}h`);
+          
+          res.json({ shareUrl });
+        } catch (err) {
+          console.error('Share creation error:', err);
+          return res.status(500).json({ error: 'Database error: ' + err.message });
+        }
       }
-    });
 
   } catch (error) {
-    res.status(500).json({ error: 'Failed to generate share link' });
+    console.error('Share generation error:', error);
+    res.status(500).json({ error: 'Failed to generate share link: ' + error.message });
   }
 });
 
@@ -1119,20 +1094,12 @@ app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
   console.log('User email:', userEmail);
 
   // Check ownership for non-owners with limited permissions
-  const bucket = await new Promise((resolve, reject) => {
-    db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
+  const bucketResult = await db.query('SELECT owner_email FROM buckets WHERE name = $1', [bucketName]);
+  const bucket = bucketResult.rows[0];
 
   if (bucket && bucket.owner_email !== userEmail) {
-    const member = await new Promise((resolve, reject) => {
-      db.get('SELECT permissions FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const memberResult = await db.query('SELECT permissions FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+    const member = memberResult.rows[0];
 
     if (member) {
       const permissions = JSON.parse(member.permissions);
@@ -1142,12 +1109,8 @@ app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
       if (!permissions.deleteFiles && !permissions.uploadViewAll && (permissions.deleteOwnFiles || permissions.uploadViewOwn)) {
         console.log('Checking ownership for delete operation...');
         for (const item of items) {
-          const ownership = await new Promise((resolve, reject) => {
-            db.get('SELECT owner_email FROM file_ownership WHERE bucket_name = ? AND file_path = ?', [bucketName, item], (err, row) => {
-              if (err) reject(err);
-              else resolve(row);
-            });
-          });
+          const ownershipResult = await db.query('SELECT owner_email FROM file_ownership WHERE bucket_name = $1 AND file_path = $2', [bucketName, item]);
+          const ownership = ownershipResult.rows[0];
 
           console.log(`Ownership check for ${item}:`, ownership);
           console.log(`User email: ${userEmail}`);
@@ -1168,18 +1131,19 @@ app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
   }
 
   try {
-    db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], async (err, row) => {
-      if (err || !row) {
-        return res.status(404).json({ error: 'Bucket not found' });
-      }
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const row = bucketResult.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
 
-      const s3Client = new S3Client({
-        region: row.region,
-        credentials: {
-          accessKeyId: row.access_key,
-          secretAccessKey: row.secret_key,
-        },
-      });
+    const s3Client = new S3Client({
+      region: row.region,
+      credentials: {
+        accessKeyId: row.access_key,
+        secretAccessKey: row.secret_key,
+      },
+    });
 
       const objectsToDelete = [];
       
@@ -1225,23 +1189,25 @@ app.delete('/api/delete', checkPermission('delete'), async (req, res) => {
         console.log('Cleaning up ownership records for:', deletedKeys);
         
         for (const key of deletedKeys) {
-          db.run('DELETE FROM file_ownership WHERE bucket_name = ? AND file_path = ?', [bucketName, key], (err) => {
-            if (err) console.error('Error cleaning up ownership record:', err);
-            else console.log('Cleaned up ownership record for:', key);
-          });
+          try {
+            await db.query('DELETE FROM file_ownership WHERE bucket_name = $1 AND file_path = $2', [bucketName, key]);
+            console.log('Cleaned up ownership record for:', key);
+          } catch (err) {
+            console.error('Error cleaning up ownership record:', err);
+          }
           
           // Log delete activity
           const action = key.endsWith('/') ? 'delete_folder' : 'delete';
-          logActivity(bucketName, userEmail, action, key);
+          await logActivity(bucketName, userEmail, action, key);
         }
       }
       
       console.log('Delete operation completed successfully');
       res.json({ success: true, deleted: objectsToDelete.length });
-    });
 
   } catch (error) {
-    res.status(500).json({ error: 'Delete failed' });
+    console.error('Delete operation error:', error);
+    res.status(500).json({ error: 'Delete failed: ' + error.message });
   }
 });
 
@@ -1250,18 +1216,14 @@ app.post('/api/organizations', async (req, res) => {
   const { bucketName, organizationName } = req.body;
   
   try {
-    db.run(
-      'INSERT INTO organizations (bucket_name, name) VALUES (?, ?)',
-      [bucketName, organizationName],
-      function(err) {
-        if (err) {
-          return res.status(500).json({ error: 'Failed to create organization' });
-        }
-        res.json({ id: this.lastID, name: organizationName });
-      }
+    const result = await db.query(
+      'INSERT INTO organizations (bucket_name, name) VALUES ($1, $2) RETURNING id',
+      [bucketName, organizationName]
     );
+    res.json({ id: result.rows[0].id, name: organizationName });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create organization' });
+    console.error('Create organization error:', error);
+    res.status(500).json({ error: 'Failed to create organization: ' + error.message });
   }
 });
 
@@ -1271,39 +1233,40 @@ app.get('/api/buckets/:bucketName/folders', async (req, res) => {
   const { ownerEmail } = req.query;
   
   try {
-    db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ? AND owner_email = ?', [bucketName, ownerEmail], async (err, row) => {
-      if (err || !row) {
-        return res.status(404).json({ error: 'Bucket not found or access denied' });
-      }
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1 AND owner_email = $2', [bucketName, ownerEmail]);
+    const row = bucketResult.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'Bucket not found or access denied' });
+    }
 
-      const s3Client = new S3Client({
-        region: row.region,
-        credentials: {
-          accessKeyId: row.access_key,
-          secretAccessKey: row.secret_key,
-        },
-      });
-
-      const command = new ListObjectsV2Command({ 
-        Bucket: bucketName,
-        Delimiter: '/'
-      });
-      const response = await s3Client.send(command);
-
-      const folders = [];
-      if (response.CommonPrefixes) {
-        response.CommonPrefixes.forEach(prefixObj => {
-          const folderName = prefixObj.Prefix.replace('/', '');
-          if (folderName) {
-            folders.push(folderName);
-          }
-        });
-      }
-
-      res.json(folders);
+    const s3Client = new S3Client({
+      region: row.region,
+      credentials: {
+        accessKeyId: row.access_key,
+        secretAccessKey: row.secret_key,
+      },
     });
+
+    const command = new ListObjectsV2Command({ 
+      Bucket: bucketName,
+      Delimiter: '/'
+    });
+    const response = await s3Client.send(command);
+
+    const folders = [];
+    if (response.CommonPrefixes) {
+      response.CommonPrefixes.forEach(prefixObj => {
+        const folderName = prefixObj.Prefix.replace('/', '');
+        if (folderName) {
+          folders.push(folderName);
+        }
+      });
+    }
+
+    res.json(folders);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch folders' });
+    console.error('Fetch folders error:', error);
+    res.status(500).json({ error: 'Failed to fetch folders: ' + error.message });
   }
 });
 
@@ -1312,14 +1275,11 @@ app.get('/api/organizations/:bucketName', async (req, res) => {
   const { bucketName } = req.params;
   
   try {
-    db.get('SELECT * FROM organizations WHERE bucket_name = ?', [bucketName], (err, org) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      res.json(org || null);
-    });
+    const result = await db.query('SELECT * FROM organizations WHERE bucket_name = $1', [bucketName]);
+    res.json(result.rows[0] || null);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get organization' });
+    console.error('Get organization error:', error);
+    res.status(500).json({ error: 'Failed to get organization: ' + error.message });
   }
 });
 
@@ -1389,32 +1349,26 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
     }
     
     console.log('Looking for organization...');
-    db.get('SELECT * FROM organizations WHERE bucket_name = ?', [bucketName], async (err, org) => {
-      if (err) {
-        console.error('Database error finding organization:', err);
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!org) {
-        console.log('No organization found for bucket:', bucketName);
-        return res.status(404).json({ error: 'Organization not found for this bucket' });
-      }
+    const orgResult = await db.query('SELECT * FROM organizations WHERE bucket_name = $1', [bucketName]);
+    const org = orgResult.rows[0];
+    if (!org) {
+      console.log('No organization found for bucket:', bucketName);
+      return res.status(404).json({ error: 'Organization not found for this bucket' });
+    }
+    
+    console.log('Organization found:', org.name);
+    
+    const inviteToken = uuidv4();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    
+    console.log('Creating invitation in database...');
+    try {
+      await db.query(
+        'INSERT INTO invitations (id, bucket_name, email, permissions, scope_type, scope_folders, expires_at, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [inviteToken, bucketName, email, JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders || []), expiresAt, userEmail]
+      );
       
-      console.log('Organization found:', org.name);
-      
-      const inviteToken = uuidv4();
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      
-      console.log('Creating invitation in database...');
-      db.run(
-        'INSERT INTO invitations (id, bucket_name, email, permissions, scope_type, scope_folders, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [inviteToken, bucketName, email, JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders || []), expiresAt, userEmail],
-        async function(err) {
-          if (err) {
-            console.error('Database error creating invitation:', err);
-            return res.status(500).json({ error: 'Failed to create invitation: ' + err.message });
-          }
-          
-          console.log('Invitation created successfully');
+      console.log('Invitation created successfully');
           
           const inviteLink = `${process.env.FRONTEND_URL}/accept-invite/${inviteToken}`;
           
@@ -1463,10 +1417,10 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
             email: email,
             inviteLink: inviteLink,
             emailSent: emailSent
-          });
-        }
-      );
-    });
+    } catch (err) {
+      console.error('Database error creating invitation:', err);
+      return res.status(500).json({ error: 'Failed to create invitation: ' + err.message });
+    }
   } catch (error) {
     res.status(500).json({ error: 'Failed to send invitation' });
   }
@@ -1477,27 +1431,25 @@ app.get('/api/invite/:token', async (req, res) => {
   const { token } = req.params;
   
   try {
-    db.get('SELECT i.*, o.name as org_name FROM invitations i JOIN organizations o ON i.bucket_name = o.bucket_name WHERE i.id = ? AND i.accepted = 0', [token], (err, invite) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!invite) {
-        return res.status(404).json({ error: 'Invitation not found or already accepted' });
-      }
-      
-      if (new Date(invite.expires_at) < new Date()) {
-        return res.status(410).json({ error: 'Invitation has expired' });
-      }
-      
-      res.json({
-        email: invite.email,
-        permissions: invite.permissions,
-        orgName: invite.org_name,
-        bucketName: invite.bucket_name
-      });
+    const result = await db.query('SELECT i.*, o.name as org_name FROM invitations i JOIN organizations o ON i.bucket_name = o.bucket_name WHERE i.id = $1 AND i.accepted = false', [token]);
+    const invite = result.rows[0];
+    if (!invite) {
+      return res.status(404).json({ error: 'Invitation not found or already accepted' });
+    }
+    
+    if (new Date(invite.expires_at) < new Date()) {
+      return res.status(410).json({ error: 'Invitation has expired' });
+    }
+    
+    res.json({
+      email: invite.email,
+      permissions: invite.permissions,
+      orgName: invite.org_name,
+      bucketName: invite.bucket_name
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get invitation' });
+    console.error('Get invitation error:', error);
+    res.status(500).json({ error: 'Failed to get invitation: ' + error.message });
   }
 });
 
@@ -1507,81 +1459,58 @@ app.post('/api/invite/:token/accept', async (req, res) => {
   const { password } = req.body;
   
   try {
-    db.get('SELECT * FROM invitations WHERE id = ? AND accepted = 0', [token], (err, invite) => {
-      if (err || !invite) {
-        return res.status(404).json({ error: 'Invitation not found' });
-      }
+    const inviteResult = await db.query('SELECT * FROM invitations WHERE id = $1 AND accepted = false', [token]);
+    const invite = inviteResult.rows[0];
+    if (!invite) {
+      return res.status(404).json({ error: 'Invitation not found' });
+    }
+    
+    if (new Date(invite.expires_at) < new Date()) {
+      return res.status(410).json({ error: 'Invitation has expired' });
+    }
+    
+    const invitedBy = invite.created_by || 'owner';
+    
+    // Check if member already exists for this bucket
+    const existingResult = await db.query('SELECT * FROM members WHERE email = $1 AND bucket_name = $2', [invite.email, invite.bucket_name]);
+    const existingMember = existingResult.rows[0];
+    
+    if (existingMember) {
+      // Update existing member's permissions
+      await db.query(
+        'UPDATE members SET password = $1, permissions = $2, scope_type = $3, scope_folders = $4, invited_by = $5 WHERE email = $6 AND bucket_name = $7',
+        [password, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy, invite.email, invite.bucket_name]
+      );
       
-      if (new Date(invite.expires_at) < new Date()) {
-        return res.status(410).json({ error: 'Invitation has expired' });
-      }
+      await db.query('UPDATE invitations SET accepted = true WHERE id = $1', [token]);
       
-      // Get who sent the invitation
-      db.get('SELECT created_by FROM invitations WHERE id = ?', [token], (err, inviteData) => {
-        const invitedBy = inviteData?.created_by || 'owner';
-        
-        // Check if member already exists for this bucket
-        db.get('SELECT * FROM members WHERE email = ? AND bucket_name = ?', [invite.email, invite.bucket_name], (err, existingMember) => {
-          if (err) {
-            return res.status(500).json({ error: 'Database error checking existing member' });
-          }
-          
-          if (existingMember) {
-            // Update existing member's permissions
-            db.run(
-              'UPDATE members SET password = ?, permissions = ?, scope_type = ?, scope_folders = ?, invited_by = ? WHERE email = ? AND bucket_name = ?',
-              [password, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy, invite.email, invite.bucket_name],
-              function(err) {
-                if (err) {
-                  return res.status(500).json({ error: 'Failed to update member account' });
-                }
-                
-                db.run('UPDATE invitations SET accepted = 1 WHERE id = ?', [token], (err) => {
-                  if (err) {
-                    return res.status(500).json({ error: 'Failed to accept invitation' });
-                  }
-                  
-                  res.json({ 
-                    message: 'Account updated successfully',
-                    bucketName: invite.bucket_name,
-                    email: invite.email,
-                    scopeType: invite.scope_type,
-                    scopeFolders: invite.scope_folders
-                  });
-                });
-              }
-            );
-          } else {
-            // Insert new member for this bucket
-            db.run(
-              'INSERT INTO members (email, password, bucket_name, permissions, scope_type, scope_folders, invited_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-              [invite.email, password, invite.bucket_name, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy],
-              function(err) {
-                if (err) {
-                  return res.status(500).json({ error: 'Failed to create member account' });
-                }
-                
-                db.run('UPDATE invitations SET accepted = 1 WHERE id = ?', [token], (err) => {
-                  if (err) {
-                    return res.status(500).json({ error: 'Failed to accept invitation' });
-                  }
-                  
-                  res.json({ 
-                    message: 'Account created successfully',
-                    bucketName: invite.bucket_name,
-                    email: invite.email,
-                    scopeType: invite.scope_type,
-                    scopeFolders: invite.scope_folders
-                  });
-                });
-              }
-            );
-          }
-        });
+      res.json({ 
+        message: 'Account updated successfully',
+        bucketName: invite.bucket_name,
+        email: invite.email,
+        scopeType: invite.scope_type,
+        scopeFolders: invite.scope_folders
       });
-    });
+    } else {
+      // Insert new member for this bucket
+      await db.query(
+        'INSERT INTO members (email, password, bucket_name, permissions, scope_type, scope_folders, invited_by) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [invite.email, password, invite.bucket_name, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy]
+      );
+      
+      await db.query('UPDATE invitations SET accepted = true WHERE id = $1', [token]);
+      
+      res.json({ 
+        message: 'Account created successfully',
+        bucketName: invite.bucket_name,
+        email: invite.email,
+        scopeType: invite.scope_type,
+        scopeFolders: invite.scope_folders
+      });
+    }
   } catch (error) {
-    res.status(500).json({ error: 'Failed to accept invitation' });
+    console.error('Accept invitation error:', error);
+    res.status(500).json({ error: 'Failed to accept invitation: ' + error.message });
   }
 });
 
@@ -1591,30 +1520,28 @@ app.post('/api/member/login', async (req, res) => {
   
   try {
     // Get all buckets this member belongs to
-    db.all('SELECT * FROM members WHERE email = ? AND password = ?', [email, password], (err, members) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!members || members.length === 0) {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-      
-      // Return all buckets the member has access to
-      const buckets = members.map(member => ({
-        bucketName: member.bucket_name,
-        permissions: member.permissions,
-        scopeType: member.scope_type,
-        scopeFolders: member.scope_folders
-      }));
-      
-      res.json({
-        message: 'Login successful',
-        email: email,
-        buckets: buckets
-      });
+    const result = await db.query('SELECT * FROM members WHERE email = $1 AND password = $2', [email, password]);
+    const members = result.rows;
+    if (!members || members.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    
+    // Return all buckets the member has access to
+    const buckets = members.map(member => ({
+      bucketName: member.bucket_name,
+      permissions: member.permissions,
+      scopeType: member.scope_type,
+      scopeFolders: member.scope_folders
+    }));
+    
+    res.json({
+      message: 'Login successful',
+      email: email,
+      buckets: buckets
     });
   } catch (error) {
-    res.status(500).json({ error: 'Login failed' });
+    console.error('Member login error:', error);
+    res.status(500).json({ error: 'Login failed: ' + error.message });
   }
 });
 
@@ -1626,12 +1553,8 @@ app.get('/api/shared/:shareId', async (req, res) => {
   console.log('Shared folder request:', shareId, 'path:', path);
   
   try {
-    const share = await new Promise((resolve, reject) => {
-      db.get('SELECT * FROM shares WHERE id = ? AND revoked = 0', [shareId], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const shareResult = await db.query('SELECT * FROM shares WHERE id = $1 AND revoked = false', [shareId]);
+    const share = shareResult.rows[0];
     
     if (!share) {
       return res.status(404).json({ error: 'Share not found or expired' });
@@ -1642,12 +1565,8 @@ app.get('/api/shared/:shareId', async (req, res) => {
     }
     
     // Get bucket info
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region FROM buckets WHERE name = $1', [share.bucket_name]);
+    const bucket = bucketResult.rows[0];
     
     if (!bucket) {
       return res.status(404).json({ error: 'Bucket not found' });
@@ -1720,23 +1639,15 @@ app.get('/api/shared/:shareId/preview/:fileKey(*)', async (req, res) => {
   const { shareId, fileKey } = req.params;
   
   try {
-    const share = await new Promise((resolve, reject) => {
-      db.get('SELECT * FROM shares WHERE id = ? AND revoked = 0', [shareId], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const shareResult = await db.query('SELECT * FROM shares WHERE id = $1 AND revoked = false', [shareId]);
+    const share = shareResult.rows[0];
     
     if (!share || new Date(share.expires_at) < new Date()) {
       return res.status(404).send('Share not found or expired');
     }
     
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region FROM buckets WHERE name = $1', [share.bucket_name]);
+    const bucket = bucketResult.rows[0];
     
     const s3Client = new S3Client({
       region: bucket.region,
@@ -1770,23 +1681,15 @@ app.get('/api/shared/:shareId/download/:fileKey(*)', async (req, res) => {
   console.log('Shared folder download:', shareId, 'fileKey:', fileKey);
   
   try {
-    const share = await new Promise((resolve, reject) => {
-      db.get('SELECT * FROM shares WHERE id = ? AND revoked = 0', [shareId], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const shareResult = await db.query('SELECT * FROM shares WHERE id = $1 AND revoked = false', [shareId]);
+    const share = shareResult.rows[0];
     
     if (!share || new Date(share.expires_at) < new Date()) {
       return res.status(404).send('Share not found or expired');
     }
     
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region FROM buckets WHERE name = $1', [share.bucket_name]);
+    const bucket = bucketResult.rows[0];
     
     const s3Client = new S3Client({
       region: bucket.region,
@@ -1822,12 +1725,8 @@ app.post('/api/rename', async (req, res) => {
   console.log('New name:', newName);
 
   try {
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const bucket = bucketResult.rows[0];
 
     if (!bucket) {
       return res.status(404).json({ error: 'Bucket not found' });
@@ -1835,12 +1734,8 @@ app.post('/api/rename', async (req, res) => {
 
     // Check permissions if not owner
     if (bucket.owner_email !== userEmail) {
-      const member = await new Promise((resolve, reject) => {
-        db.get('SELECT permissions FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        });
-      });
+      const memberResult = await db.query('SELECT permissions FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+      const member = memberResult.rows[0];
 
       if (!member) {
         return res.status(403).json({ error: 'Access denied' });
@@ -1853,12 +1748,8 @@ app.post('/api/rename', async (req, res) => {
       if (!permissions.uploadViewAll && !permissions.deleteFiles) {
         // User can only rename own files - check ownership
         if (permissions.uploadViewOwn || permissions.deleteOwnFiles) {
-          const ownership = await new Promise((resolve, reject) => {
-            db.get('SELECT owner_email FROM file_ownership WHERE bucket_name = ? AND file_path = ?', [bucketName, oldKey], (err, row) => {
-              if (err) reject(err);
-              else resolve(row);
-            });
-          });
+          const ownershipResult = await db.query('SELECT owner_email FROM file_ownership WHERE bucket_name = $1 AND file_path = $2', [bucketName, oldKey]);
+          const ownership = ownershipResult.rows[0];
 
           console.log('File ownership check:', ownership);
           
@@ -1920,13 +1811,11 @@ app.post('/api/rename', async (req, res) => {
       const oldFolderPath = oldPrefix.replace(/\/$/, ''); // Remove trailing slash
       const newFolderPath = newPrefix.replace(/\/$/, ''); // Remove trailing slash
       
-      db.all('SELECT email, scope_folders FROM members WHERE bucket_name = ? AND scope_type = "specific"', [bucketName], (err, members) => {
-        if (err) {
-          console.error('Error fetching members for folder rename update:', err);
-          return;
-        }
+      try {
+        const membersResult = await db.query('SELECT email, scope_folders FROM members WHERE bucket_name = $1 AND scope_type = $2', [bucketName, 'specific']);
+        const members = membersResult.rows;
         
-        members.forEach(member => {
+        for (const member of members) {
           try {
             const scopeFolders = JSON.parse(member.scope_folders || '[]');
             let updated = false;
@@ -1949,20 +1838,21 @@ app.post('/api/rename', async (req, res) => {
               console.log(`  Old folders: ${JSON.stringify(scopeFolders)}`);
               console.log(`  New folders: ${JSON.stringify(updatedFolders)}`);
               
-              db.run('UPDATE members SET scope_folders = ? WHERE email = ? AND bucket_name = ?', 
-                [JSON.stringify(updatedFolders), member.email, bucketName], (updateErr) => {
-                if (updateErr) {
-                  console.error('Error updating member permissions after folder rename:', updateErr);
-                } else {
-                  console.log(`✅ Updated permissions for ${member.email}`);
-                }
-              });
+              try {
+                await db.query('UPDATE members SET scope_folders = $1 WHERE email = $2 AND bucket_name = $3', 
+                  [JSON.stringify(updatedFolders), member.email, bucketName]);
+                console.log(`✅ Updated permissions for ${member.email}`);
+              } catch (updateErr) {
+                console.error('Error updating member permissions after folder rename:', updateErr);
+              }
             }
           } catch (parseErr) {
             console.error('Error parsing scope_folders for member:', member.email, parseErr);
           }
-        });
-      });
+        }
+      } catch (err) {
+        console.error('Error fetching members for folder rename update:', err);
+      }
     } else {
       // For files, copy to new name and delete old
       const fileExtension = oldKey.split('.').pop();
@@ -1993,35 +1883,36 @@ app.post('/api/rename', async (req, res) => {
       const newKey = currentPath ? `${currentPath}/${newName}` : newName;
       const finalNewKey = newName.includes('.') ? newKey : `${newKey}.${fileExtension}`;
       
-      db.run('UPDATE file_ownership SET file_path = ? WHERE bucket_name = ? AND file_path = ?', 
-        [finalNewKey, bucketName, oldKey], (err) => {
-        if (err) console.error('Error updating ownership record:', err);
-        else console.log('Updated ownership record:', oldKey, '->', finalNewKey);
-      });
+      try {
+        await db.query('UPDATE file_ownership SET file_path = $1 WHERE bucket_name = $2 AND file_path = $3', 
+          [finalNewKey, bucketName, oldKey]);
+        console.log('Updated ownership record:', oldKey, '->', finalNewKey);
+      } catch (err) {
+        console.error('Error updating ownership record:', err);
+      };
     } else if (type === 'folder') {
       // Update ownership records for all files in the renamed folder
       const oldPrefix = oldKey.endsWith('/') ? oldKey : oldKey + '/';
       const newPrefix = currentPath ? `${currentPath}/${newName}/` : `${newName}/`;
       
-      db.all('SELECT file_path FROM file_ownership WHERE bucket_name = ? AND file_path LIKE ?', 
-        [bucketName, oldPrefix + '%'], (err, files) => {
-        if (err) {
-          console.error('Error fetching ownership records for folder rename:', err);
-          return;
-        }
+      try {
+        const filesResult = await db.query('SELECT file_path FROM file_ownership WHERE bucket_name = $1 AND file_path LIKE $2', 
+          [bucketName, oldPrefix + '%']);
+        const files = filesResult.rows;
         
-        files.forEach(file => {
+        for (const file of files) {
           const newFilePath = file.file_path.replace(oldPrefix, newPrefix);
-          db.run('UPDATE file_ownership SET file_path = ? WHERE bucket_name = ? AND file_path = ?', 
-            [newFilePath, bucketName, file.file_path], (updateErr) => {
-            if (updateErr) {
-              console.error('Error updating ownership record for file in renamed folder:', updateErr);
-            } else {
-              console.log('Updated ownership record:', file.file_path, '->', newFilePath);
-            }
-          });
-        });
-      });
+          try {
+            await db.query('UPDATE file_ownership SET file_path = $1 WHERE bucket_name = $2 AND file_path = $3', 
+              [newFilePath, bucketName, file.file_path]);
+            console.log('Updated ownership record:', file.file_path, '->', newFilePath);
+          } catch (updateErr) {
+            console.error('Error updating ownership record for file in renamed folder:', updateErr);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching ownership records for folder rename:', err);
+      };
     }
     
     // Log rename activity
@@ -2032,7 +1923,7 @@ app.post('/api/rename', async (req, res) => {
     const oldFileName = oldKey.split('/').pop();
     const newFileName = type === 'folder' ? newName : (newName.includes('.') ? newName : `${newName}.${oldFileName.split('.').pop()}`);
     
-    logActivity(bucketName, userEmail, 'rename', finalNewKey, oldFileName, newFileName);
+    await logActivity(bucketName, userEmail, 'rename', finalNewKey, oldFileName, newFileName);
     
     res.json({ success: true, message: 'Renamed successfully' });
 
@@ -2052,12 +1943,8 @@ app.get('/api/buckets/:bucketName/search', async (req, res) => {
   }
 
   try {
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const bucket = bucketResult.rows[0];
 
     if (!bucket) {
       return res.status(404).json({ error: 'Bucket not found' });
@@ -2099,11 +1986,8 @@ app.get('/api/buckets/:bucketName/search', async (req, res) => {
 
     // Apply permission-based filtering
     if (userEmail && bucket.owner_email !== userEmail) {
-      const member = await new Promise((resolve) => {
-        db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
-          resolve(row);
-        });
-      });
+      const memberResult = await db.query('SELECT scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', [userEmail, bucketName]);
+      const member = memberResult.rows[0];
 
       if (member && (member.scope_type === 'specific' || member.scope_type === 'nested')) {
         const allowedFolders = JSON.parse(member.scope_folders || '[]');
@@ -2141,12 +2025,8 @@ app.get('/api/buckets/:bucketName/folders/tree', async (req, res) => {
   const { ownerEmail, memberEmail } = req.query;
 
   try {
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const bucket = bucketResult.rows[0];
 
     if (!bucket) {
       return res.status(404).json({ error: 'Bucket not found' });
@@ -2188,11 +2068,8 @@ app.get('/api/buckets/:bucketName/folders/tree', async (req, res) => {
 
     // If member is requesting, filter by their accessible scope
     if (memberEmail && bucket.owner_email !== memberEmail) {
-      const member = await new Promise((resolve) => {
-        db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [memberEmail, bucketName], (err, row) => {
-          resolve(row);
-        });
-      });
+      const memberResult = await db.query('SELECT scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', [memberEmail, bucketName]);
+      const member = memberResult.rows[0];
 
       if (member && member.scope_type === 'specific') {
         const allowedFolders = JSON.parse(member.scope_folders || '[]');
@@ -2225,30 +2102,25 @@ app.get('/api/buckets/:bucketName/all-members', async (req, res) => {
 
   try {
     // Verify the requester is the bucket owner
-    db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
-      if (err || !bucket) {
-        console.log('Bucket not found or error:', err);
-        return res.status(404).json({ error: 'Bucket not found' });
-      }
-      
-      console.log('Bucket owner email:', bucket.owner_email);
-      console.log('Requested by email:', ownerEmail);
-      
-      if (bucket.owner_email !== ownerEmail) {
-        console.log('Owner email mismatch!');
-        return res.status(403).json({ error: 'Only bucket owner can view all members' });
-      }
-      
-      // Get all members for this bucket
-      db.all('SELECT email, permissions, scope_type, scope_folders, invited_by FROM members WHERE bucket_name = ?', [bucketName], (err, members) => {
-        if (err) {
-          console.error('Database error:', err);
-          return res.status(500).json({ error: 'Database error' });
-        }
-        console.log('Members found:', members);
-        res.json(members || []);
-      });
-    });
+    const bucketResult = await db.query('SELECT owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const bucket = bucketResult.rows[0];
+    if (!bucket) {
+      console.log('Bucket not found');
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+    
+    console.log('Bucket owner email:', bucket.owner_email);
+    console.log('Requested by email:', ownerEmail);
+    
+    if (bucket.owner_email !== ownerEmail) {
+      console.log('Owner email mismatch!');
+      return res.status(403).json({ error: 'Only bucket owner can view all members' });
+    }
+    
+    // Get all members for this bucket
+    const membersResult = await db.query('SELECT email, permissions, scope_type, scope_folders, invited_by FROM members WHERE bucket_name = $1', [bucketName]);
+    console.log('Members found:', membersResult.rows);
+    res.json(membersResult.rows || []);
   } catch (error) {
     console.error('Failed to load all members:', error);
     res.status(500).json({ error: 'Failed to load members' });
@@ -2263,22 +2135,12 @@ app.get('/api/buckets/:bucketName/members', async (req, res) => {
   try {
     if (isOwner === 'true') {
       // Owner can see all members
-      db.all('SELECT email, scope_type, scope_folders FROM members WHERE bucket_name = ?', [bucketName], (err, members) => {
-        if (err) {
-          console.error('Database error:', err);
-          return res.status(500).json({ error: 'Database error' });
-        }
-        res.json(members || []);
-      });
+      const result = await db.query('SELECT email, scope_type, scope_folders FROM members WHERE bucket_name = $1', [bucketName]);
+      res.json(result.rows || []);
     } else {
       // Member can only see members they invited
-      db.all('SELECT email, scope_type, scope_folders FROM members WHERE bucket_name = ? AND invited_by = ?', [bucketName, userEmail], (err, members) => {
-        if (err) {
-          console.error('Database error:', err);
-          return res.status(500).json({ error: 'Database error' });
-        }
-        res.json(members || []);
-      });
+      const result = await db.query('SELECT email, scope_type, scope_folders FROM members WHERE bucket_name = $1 AND invited_by = $2', [bucketName, userEmail]);
+      res.json(result.rows || []);
     }
   } catch (error) {
     console.error('Failed to load members:', error);
@@ -2292,16 +2154,13 @@ app.get('/api/members/:email/permissions', async (req, res) => {
   const { bucketName } = req.query;
 
   try {
-    db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
-      [email, bucketName], (err, member) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!member) {
-        return res.status(404).json({ error: 'Member not found in this bucket' });
-      }
-      res.json(member);
-    });
+    const result = await db.query('SELECT permissions, scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', 
+      [email, bucketName]);
+    const member = result.rows[0];
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found in this bucket' });
+    }
+    res.json(member);
   } catch (error) {
     res.status(500).json({ error: 'Failed to get member permissions' });
   }
@@ -2312,20 +2171,17 @@ app.get('/api/member/:email/bucket/:bucketName', async (req, res) => {
   const { email, bucketName } = req.params;
 
   try {
-    db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
-      [email, bucketName], (err, member) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!member) {
-        return res.status(404).json({ error: 'Member not found in this bucket' });
-      }
-      res.json({
-        bucketName: bucketName,
-        permissions: member.permissions,
-        scopeType: member.scope_type,
-        scopeFolders: member.scope_folders
-      });
+    const result = await db.query('SELECT permissions, scope_type, scope_folders FROM members WHERE email = $1 AND bucket_name = $2', 
+      [email, bucketName]);
+    const member = result.rows[0];
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found in this bucket' });
+    }
+    res.json({
+      bucketName: bucketName,
+      permissions: member.permissions,
+      scopeType: member.scope_type,
+      scopeFolders: member.scope_folders
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get member bucket permissions' });
@@ -2343,25 +2199,19 @@ app.post('/api/files/ownership', async (req, res) => {
   console.log('Owner Email:', ownerEmail);
 
   try {
-    db.run(
-      'INSERT OR REPLACE INTO file_ownership (bucket_name, file_path, owner_email, uploaded_at) VALUES (?, ?, ?, ?)',
-      [bucketName, filePath, ownerEmail, new Date().toISOString()],
-      function(err) {
-        if (err) {
-          console.error('Error tracking file ownership:', err);
-          return res.status(500).json({ error: 'Failed to track ownership' });
-        }
-        console.log('✅ File ownership tracked successfully');
-        
-        // Log the upload activity
-        logActivity(bucketName, ownerEmail, 'upload', filePath);
-        
-        res.json({ success: true });
-      }
+    await db.query(
+      'INSERT INTO file_ownership (bucket_name, file_path, owner_email, uploaded_at) VALUES ($1, $2, $3, $4) ON CONFLICT (bucket_name, file_path) DO UPDATE SET owner_email = $3, uploaded_at = $4',
+      [bucketName, filePath, ownerEmail, new Date().toISOString()]
     );
+    console.log('✅ File ownership tracked successfully');
+    
+    // Log the upload activity
+    await logActivity(bucketName, ownerEmail, 'upload', filePath);
+    
+    res.json({ success: true });
   } catch (error) {
     console.error('File ownership tracking error:', error);
-    res.status(500).json({ error: 'Failed to track ownership' });
+    res.status(500).json({ error: 'Failed to track ownership: ' + error.message });
   }
 });
 
@@ -2375,21 +2225,15 @@ app.get('/api/files/ownership/:bucketName', async (req, res) => {
   console.log('User Email:', userEmail);
 
   try {
-    db.all(
-      'SELECT file_path FROM file_ownership WHERE bucket_name = ? AND owner_email = ?',
-      [bucketName, userEmail],
-      (err, files) => {
-        if (err) {
-          console.error('Error getting owned files:', err);
-          return res.status(500).json({ error: 'Failed to get owned files' });
-        }
-        console.log('Owned files found:', files);
-        res.json(files || []);
-      }
+    const result = await db.query(
+      'SELECT file_path FROM file_ownership WHERE bucket_name = $1 AND owner_email = $2',
+      [bucketName, userEmail]
     );
+    console.log('Owned files found:', result.rows);
+    res.json(result.rows || []);
   } catch (error) {
     console.error('Get owned files error:', error);
-    res.status(500).json({ error: 'Failed to get owned files' });
+    res.status(500).json({ error: 'Failed to get owned files: ' + error.message });
   }
 });
 
@@ -2399,30 +2243,28 @@ app.post('/api/member/google-login', async (req, res) => {
   
   try {
     // Get all buckets this member belongs to
-    db.all('SELECT * FROM members WHERE email = ?', [email], (err, members) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!members || members.length === 0) {
-        return res.status(401).json({ error: 'You are not a member of any organization. Please contact your administrator for an invitation.' });
-      }
-      
-      // Return all buckets the member has access to
-      const buckets = members.map(member => ({
-        bucketName: member.bucket_name,
-        permissions: member.permissions,
-        scopeType: member.scope_type,
-        scopeFolders: member.scope_folders
-      }));
-      
-      res.json({
-        message: 'Google login successful',
-        email: email,
-        buckets: buckets
-      });
+    const result = await db.query('SELECT * FROM members WHERE email = $1', [email]);
+    const members = result.rows;
+    if (!members || members.length === 0) {
+      return res.status(401).json({ error: 'You are not a member of any organization. Please contact your administrator for an invitation.' });
+    }
+    
+    // Return all buckets the member has access to
+    const buckets = members.map(member => ({
+      bucketName: member.bucket_name,
+      permissions: member.permissions,
+      scopeType: member.scope_type,
+      scopeFolders: member.scope_folders
+    }));
+    
+    res.json({
+      message: 'Google login successful',
+      email: email,
+      buckets: buckets
     });
   } catch (error) {
-    res.status(500).json({ error: 'Google login failed' });
+    console.error('Google login error:', error);
+    res.status(500).json({ error: 'Google login failed: ' + error.message });
   }
 });
 
@@ -2431,24 +2273,18 @@ app.post('/api/member/change-password', async (req, res) => {
   const { email, currentPassword, newPassword } = req.body;
   
   try {
-    db.get('SELECT * FROM members WHERE email = ? AND password = ?', [email, currentPassword], (err, member) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!member) {
-        return res.status(401).json({ error: 'Current password is incorrect' });
-      }
-      
-      db.run('UPDATE members SET password = ? WHERE email = ?', [newPassword, email], function(err) {
-        if (err) {
-          return res.status(500).json({ error: 'Failed to update password' });
-        }
-        
-        res.json({ message: 'Password changed successfully' });
-      });
-    });
+    const memberResult = await db.query('SELECT * FROM members WHERE email = $1 AND password = $2', [email, currentPassword]);
+    const member = memberResult.rows[0];
+    if (!member) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    
+    await db.query('UPDATE members SET password = $1 WHERE email = $2', [newPassword, email]);
+    
+    res.json({ message: 'Password changed successfully' });
   } catch (error) {
-    res.status(500).json({ error: 'Password change failed' });
+    console.error('Password change error:', error);
+    res.status(500).json({ error: 'Password change failed: ' + error.message });
   }
 });
 
@@ -2464,30 +2300,24 @@ app.put('/api/members/:email/permissions', async (req, res) => {
   console.log('New scope:', scopeType, scopeFolders);
   
   try {
-    db.run(
-      'UPDATE members SET permissions = ?, scope_type = ?, scope_folders = ? WHERE email = ? AND bucket_name = ?',
-      [JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders), email, bucketName],
-      function(err) {
-        if (err) {
-          console.error('Database error updating member:', err);
-          return res.status(500).json({ error: 'Failed to update member permissions' });
-        }
-        
-        if (this.changes === 0) {
-          return res.status(404).json({ error: 'Member not found' });
-        }
-        
-        console.log('Member permissions updated successfully');
-        
-        // Log permission change activity
-        logActivity(bucketName, 'owner', 'permission_change', email, null, 'Permissions updated');
-        
-        res.json({ success: true, message: 'Permissions updated successfully' });
-      }
+    const result = await db.query(
+      'UPDATE members SET permissions = $1, scope_type = $2, scope_folders = $3 WHERE email = $4 AND bucket_name = $5',
+      [JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders), email, bucketName]
     );
+    
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+    
+    console.log('Member permissions updated successfully');
+    
+    // Log permission change activity
+    await logActivity(bucketName, 'owner', 'permission_change', email, null, 'Permissions updated');
+    
+    res.json({ success: true, message: 'Permissions updated successfully' });
   } catch (error) {
     console.error('Error updating member permissions:', error);
-    res.status(500).json({ error: 'Failed to update permissions' });
+    res.status(500).json({ error: 'Failed to update permissions: ' + error.message });
   }
 });
 
@@ -2502,34 +2332,28 @@ app.get('/api/buckets/:bucketName/logs', async (req, res) => {
 
   try {
     // Verify the requester is the bucket owner
-    db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
-      if (err || !bucket) {
-        console.log('Bucket not found or error:', err);
-        return res.status(404).json({ error: 'Bucket not found' });
-      }
-      
-      if (bucket.owner_email !== ownerEmail) {
-        console.log('Owner email mismatch!');
-        return res.status(403).json({ error: 'Only bucket owner can view activity logs' });
-      }
-      
-      // Get activity logs for this bucket (most recent first)
-      db.all(
-        'SELECT user_email, action, resource_path, old_name, details, timestamp FROM activity_logs WHERE bucket_name = ? ORDER BY timestamp DESC LIMIT 100',
-        [bucketName],
-        (err, logs) => {
-          if (err) {
-            console.error('Database error:', err);
-            return res.status(500).json({ error: 'Database error' });
-          }
-          console.log('Activity logs found:', logs.length);
-          res.json(logs || []);
-        }
-      );
-    });
+    const bucketResult = await db.query('SELECT owner_email FROM buckets WHERE name = $1', [bucketName]);
+    const bucket = bucketResult.rows[0];
+    if (!bucket) {
+      console.log('Bucket not found');
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+    
+    if (bucket.owner_email !== ownerEmail) {
+      console.log('Owner email mismatch!');
+      return res.status(403).json({ error: 'Only bucket owner can view activity logs' });
+    }
+    
+    // Get activity logs for this bucket (most recent first)
+    const logsResult = await db.query(
+      'SELECT user_email, action, resource_path, old_name, details, timestamp FROM activity_logs WHERE bucket_name = $1 ORDER BY timestamp DESC LIMIT 100',
+      [bucketName]
+    );
+    console.log('Activity logs found:', logsResult.rows.length);
+    res.json(logsResult.rows || []);
   } catch (error) {
     console.error('Failed to load activity logs:', error);
-    res.status(500).json({ error: 'Failed to load logs' });
+    res.status(500).json({ error: 'Failed to load logs: ' + error.message });
   }
 });
 
@@ -2539,30 +2363,24 @@ app.delete('/api/members/:email', async (req, res) => {
   const { bucketName } = req.body;
   
   try {
-    db.run(
-      'DELETE FROM members WHERE email = ? AND bucket_name = ?',
-      [email, bucketName],
-      function(err) {
-        if (err) {
-          console.error('Database error removing member:', err);
-          return res.status(500).json({ error: 'Failed to remove member' });
-        }
-        
-        if (this.changes === 0) {
-          return res.status(404).json({ error: 'Member not found' });
-        }
-        
-        console.log('Member removed successfully:', email);
-        
-        // Log member removal activity
-        logActivity(bucketName, 'owner', 'member_removed', email, null, 'Member removed from organization');
-        
-        res.json({ success: true, message: 'Member removed successfully' });
-      }
+    const result = await db.query(
+      'DELETE FROM members WHERE email = $1 AND bucket_name = $2',
+      [email, bucketName]
     );
+    
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+    
+    console.log('Member removed successfully:', email);
+    
+    // Log member removal activity
+    await logActivity(bucketName, 'owner', 'member_removed', email, null, 'Member removed from organization');
+    
+    res.json({ success: true, message: 'Member removed successfully' });
   } catch (error) {
     console.error('Error removing member:', error);
-    res.status(500).json({ error: 'Failed to remove member' });
+    res.status(500).json({ error: 'Failed to remove member: ' + error.message });
   }
 });
 
@@ -2636,31 +2454,29 @@ app.get('/api/debug/member/:email', async (req, res) => {
   const { bucketName } = req.query;
   
   try {
-    db.get('SELECT email, scope_folders, scope_type FROM members WHERE email = ? AND bucket_name = ?', 
-      [email, bucketName], (err, member) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!member) {
-        return res.status(404).json({ error: 'Member not found' });
-      }
-      
-      let scopeFolders = [];
-      try {
-        scopeFolders = JSON.parse(member.scope_folders || '[]');
-      } catch (e) {
-        scopeFolders = [];
-      }
-      
-      res.json({
-        email: member.email,
-        scopeType: member.scope_type,
-        scopeFolders: scopeFolders,
-        rawScopeFolders: member.scope_folders
-      });
+    const result = await db.query('SELECT email, scope_folders, scope_type FROM members WHERE email = $1 AND bucket_name = $2', 
+      [email, bucketName]);
+    const member = result.rows[0];
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+    
+    let scopeFolders = [];
+    try {
+      scopeFolders = JSON.parse(member.scope_folders || '[]');
+    } catch (e) {
+      scopeFolders = [];
+    }
+    
+    res.json({
+      email: member.email,
+      scopeType: member.scope_type,
+      scopeFolders: scopeFolders,
+      rawScopeFolders: member.scope_folders
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get member info' });
+    console.error('Debug member error:', error);
+    res.status(500).json({ error: 'Failed to get member info: ' + error.message });
   }
 });
 
@@ -2834,12 +2650,8 @@ app.get('/api/analytics/complete', async (req, res) => {
     }
 
     // Get all buckets for owner
-    const buckets = await new Promise((resolve, reject) => {
-      db.all('SELECT name, access_key, secret_key, region FROM buckets WHERE owner_email = ?', [ownerEmail], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
+    const bucketsResult = await db.query('SELECT name, access_key, secret_key, region FROM buckets WHERE owner_email = $1', [ownerEmail]);
+    const buckets = bucketsResult.rows;
 
     if (!buckets || buckets.length === 0) {
       return res.status(404).json({ error: 'No buckets found' });
@@ -2915,19 +2727,13 @@ app.get('/api/analytics/complete', async (req, res) => {
         });
 
         // Get member count for this bucket
-        const memberCount = await new Promise((resolve) => {
-          db.get('SELECT COUNT(*) as count FROM members WHERE bucket_name = ?', [bucket.name], (err, result) => {
-            resolve(result ? result.count : 0);
-          });
-        });
+        const memberCountResult = await db.query('SELECT COUNT(*) as count FROM members WHERE bucket_name = $1', [bucket.name]);
+        const memberCount = parseInt(memberCountResult.rows[0].count);
         memberStats[bucket.name] = memberCount;
 
         // Get share count for this bucket
-        const shareCount = await new Promise((resolve) => {
-          db.get('SELECT COUNT(*) as count FROM shares WHERE bucket_name = ? AND revoked = 0 AND expires_at > datetime("now")', [bucket.name], (err, result) => {
-            resolve(result ? result.count : 0);
-          });
-        });
+        const shareCountResult = await db.query('SELECT COUNT(*) as count FROM shares WHERE bucket_name = $1 AND revoked = false AND expires_at > NOW()', [bucket.name]);
+        const shareCount = parseInt(shareCountResult.rows[0].count);
         shareStats[bucket.name] = shareCount;
 
       } catch (error) {
@@ -2936,35 +2742,20 @@ app.get('/api/analytics/complete', async (req, res) => {
     }
 
     // Get overall activity stats
-    const activeUsers = await new Promise((resolve) => {
-      db.get('SELECT COUNT(DISTINCT user_email) as count FROM activity_logs WHERE timestamp > datetime("now", "-30 days")', [], (err, result) => {
-        resolve(result ? result.count : 0);
-      });
-    });
+    const activeUsersResult = await db.query('SELECT COUNT(DISTINCT user_email) as count FROM activity_logs WHERE timestamp > NOW() - INTERVAL \'30 days\'');
+    const activeUsers = parseInt(activeUsersResult.rows[0].count);
 
-    const recentUploads = await new Promise((resolve) => {
-      db.get('SELECT COUNT(*) as count FROM activity_logs WHERE action = "upload" AND timestamp > datetime("now", "-7 days")', [], (err, result) => {
-        resolve(result ? result.count : 0);
-      });
-    });
+    const recentUploadsResult = await db.query('SELECT COUNT(*) as count FROM activity_logs WHERE action = $1 AND timestamp > NOW() - INTERVAL \'7 days\'', ['upload']);
+    const recentUploads = parseInt(recentUploadsResult.rows[0].count);
 
-    const totalMembers = await new Promise((resolve) => {
-      db.get('SELECT COUNT(*) as count FROM members', [], (err, result) => {
-        resolve(result ? result.count : 0);
-      });
-    });
+    const totalMembersResult = await db.query('SELECT COUNT(*) as count FROM members');
+    const totalMembers = parseInt(totalMembersResult.rows[0].count);
 
-    const totalShares = await new Promise((resolve) => {
-      db.get('SELECT COUNT(*) as count FROM shares WHERE revoked = 0 AND expires_at > datetime("now")', [], (err, result) => {
-        resolve(result ? result.count : 0);
-      });
-    });
+    const totalSharesResult = await db.query('SELECT COUNT(*) as count FROM shares WHERE revoked = false AND expires_at > NOW()');
+    const totalShares = parseInt(totalSharesResult.rows[0].count);
 
-    const recentActivity = await new Promise((resolve) => {
-      db.all('SELECT user_email, action, resource_path, timestamp, bucket_name FROM activity_logs ORDER BY timestamp DESC LIMIT 20', [], (err, rows) => {
-        resolve(rows || []);
-      });
-    });
+    const recentActivityResult = await db.query('SELECT user_email, action, resource_path, timestamp, bucket_name FROM activity_logs ORDER BY timestamp DESC LIMIT 20');
+    const recentActivity = recentActivityResult.rows;
 
     // Format data
     const formatSize = (bytes) => {
@@ -3028,12 +2819,8 @@ app.get('/api/buckets/:bucketName/analytics', async (req, res) => {
 
   try {
     // Verify owner
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = ? AND owner_email = ?', [bucketName, ownerEmail], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region, owner_email FROM buckets WHERE name = $1 AND owner_email = $2', [bucketName, ownerEmail]);
+    const bucket = bucketResult.rows[0];
 
     if (!bucket) {
       return res.status(404).json({ error: 'Bucket not found or access denied' });
@@ -3095,52 +2882,31 @@ app.get('/api/buckets/:bucketName/analytics', async (req, res) => {
     totalFolders = folderSet.size;
 
     // Get file ownership data for user statistics
-    const fileOwnership = await new Promise((resolve) => {
-      db.all('SELECT owner_email, COUNT(*) as files FROM file_ownership WHERE bucket_name = ? GROUP BY owner_email', [bucketName], (err, rows) => {
-        resolve(rows || []);
-      });
-    });
+    const fileOwnershipResult = await db.query('SELECT owner_email, COUNT(*) as files FROM file_ownership WHERE bucket_name = $1 GROUP BY owner_email', [bucketName]);
+    const fileOwnership = fileOwnershipResult.rows;
 
     fileOwnership.forEach(row => {
       uploadsByUser[row.owner_email] = row.files;
     });
 
     // Get user activity stats
-    const activeUsers = await new Promise((resolve) => {
-      db.get('SELECT COUNT(DISTINCT user_email) as count FROM activity_logs WHERE bucket_name = ? AND timestamp > datetime("now", "-30 days")', [bucketName], (err, result) => {
-        resolve(result ? result.count : 0);
-      });
-    });
+    const activeUsersResult = await db.query('SELECT COUNT(DISTINCT user_email) as count FROM activity_logs WHERE bucket_name = $1 AND timestamp > NOW() - INTERVAL \'30 days\'', [bucketName]);
+    const activeUsers = parseInt(activeUsersResult.rows[0].count);
 
-    const recentUploads = await new Promise((resolve) => {
-      db.get('SELECT COUNT(*) as count FROM activity_logs WHERE bucket_name = ? AND action = "upload" AND timestamp > datetime("now", "-7 days")', [bucketName], (err, result) => {
-        resolve(result ? result.count : 0);
-      });
-    });
+    const recentUploadsResult = await db.query('SELECT COUNT(*) as count FROM activity_logs WHERE bucket_name = $1 AND action = $2 AND timestamp > NOW() - INTERVAL \'7 days\'', [bucketName, 'upload']);
+    const recentUploads = parseInt(recentUploadsResult.rows[0].count);
 
-    const totalMembers = await new Promise((resolve) => {
-      db.get('SELECT COUNT(*) as count FROM members WHERE bucket_name = ?', [bucketName], (err, result) => {
-        resolve(result ? result.count : 0);
-      });
-    });
+    const totalMembersResult = await db.query('SELECT COUNT(*) as count FROM members WHERE bucket_name = $1', [bucketName]);
+    const totalMembers = parseInt(totalMembersResult.rows[0].count);
 
-    const totalShares = await new Promise((resolve) => {
-      db.get('SELECT COUNT(*) as count FROM shares WHERE bucket_name = ? AND revoked = 0 AND expires_at > datetime("now")', [bucketName], (err, result) => {
-        resolve(result ? result.count : 0);
-      });
-    });
+    const totalSharesResult = await db.query('SELECT COUNT(*) as count FROM shares WHERE bucket_name = $1 AND revoked = false AND expires_at > NOW()', [bucketName]);
+    const totalShares = parseInt(totalSharesResult.rows[0].count);
 
-    const recentActivity = await new Promise((resolve) => {
-      db.all('SELECT user_email, action, resource_path, timestamp FROM activity_logs WHERE bucket_name = ? ORDER BY timestamp DESC LIMIT 15', [bucketName], (err, rows) => {
-        resolve(rows || []);
-      });
-    });
+    const recentActivityResult = await db.query('SELECT user_email, action, resource_path, timestamp FROM activity_logs WHERE bucket_name = $1 ORDER BY timestamp DESC LIMIT 15', [bucketName]);
+    const recentActivity = recentActivityResult.rows;
 
-    const memberList = await new Promise((resolve) => {
-      db.all('SELECT email, permissions, scope_type FROM members WHERE bucket_name = ?', [bucketName], (err, rows) => {
-        resolve(rows || []);
-      });
-    });
+    const memberListResult = await db.query('SELECT email, permissions, scope_type FROM members WHERE bucket_name = $1', [bucketName]);
+    const memberList = memberListResult.rows;
 
     // Format data
     const formatSize = (bytes) => {
