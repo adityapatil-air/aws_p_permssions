@@ -124,12 +124,17 @@ export default function OwnerDashboard() {
       console.log('Making request to:', `${API_BASE_URL}/api/buckets`);
       console.log('Request data:', { accessKey: accessKey.substring(0, 4) + '...', secretKey: '***', region, bucketName, ownerEmail });
       
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
       const response = await fetch(`${API_BASE_URL}/api/buckets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessKey, secretKey, region, bucketName, ownerEmail })
+        body: JSON.stringify({ accessKey, secretKey, region, bucketName, ownerEmail }),
+        signal: controller.signal
       });
       
+      clearTimeout(timeoutId);
       console.log('Response status:', response.status);
       const data = await response.json();
       console.log('Response data:', data);
@@ -153,7 +158,12 @@ export default function OwnerDashboard() {
       resetForm();
       
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to create bucket");
+      console.error('Bucket creation error:', error);
+      if (error.name === 'AbortError') {
+        setError('Request timed out. Please check your network connection and try again.');
+      } else {
+        setError(error instanceof Error ? error.message : "Failed to create bucket");
+      }
     } finally {
       setIsVerifying(false);
     }
