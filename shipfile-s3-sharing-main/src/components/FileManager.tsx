@@ -16,6 +16,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { useClerk } from "@clerk/clerk-react";
 import React from "react";
 import { useDarkMode } from '../hooks/use-dark-mode';
+import { API_BASE_URL } from '../config';
 
 interface FileItem {
   id: string;
@@ -237,7 +238,7 @@ export default function FileManager() {
       if (userEmail) params.append('userEmail', userEmail);
       params.append('recursive', 'true');
 
-      const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/files/all?${params.toString()}`);
+      const response = await fetch(`${API_BASE_URL}/api/buckets/${currentBucket}/files/all?${params.toString()}`);
       const data = await response.json();
       setAllFiles(data);
     } catch (error) {
@@ -310,7 +311,7 @@ export default function FileManager() {
         console.log('Upload request - Current Path:', currentPath);
         console.log('Upload request - File Name:', file.name);
         
-        const response = await fetch('http://localhost:3001/api/upload-url', {
+        const response = await fetch(`${API_BASE_URL}/api/upload-url`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -354,7 +355,7 @@ export default function FileManager() {
           }
         }
         
-        await fetch('http://localhost:3001/api/files/ownership', {
+        await fetch(`${API_BASE_URL}/api/files/ownership`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -391,7 +392,7 @@ export default function FileManager() {
     if (!folderName.trim()) return;
     
     try {
-      const response = await fetch('http://localhost:3001/api/folders', {
+      const response = await fetch(`${API_BASE_URL}/api/folders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -452,14 +453,14 @@ export default function FileManager() {
       
       if (userEmail) params.append('userEmail', userEmail);
       
-      const url = `http://localhost:3001/api/buckets/${currentBucket}/files${params.toString() ? '?' + params.toString() : ''}`;
+      const url = `${API_BASE_URL}/api/buckets/${currentBucket}/files${params.toString() ? '?' + params.toString() : ''}`;
       const response = await fetch(url);
       let data = await response.json();
       
       // Get bucket info to check ownership
       let bucket = null;
       try {
-        const bucketResponse = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/info?userEmail=${encodeURIComponent(userEmail)}`);
+        const bucketResponse = await fetch(`${API_BASE_URL}/api/buckets/${currentBucket}/info?userEmail=${encodeURIComponent(userEmail)}`);
         if (bucketResponse.ok) {
           bucket = await bucketResponse.json();
         }
@@ -470,7 +471,7 @@ export default function FileManager() {
       // Filter files based on current permissions (fetch fresh from database)
       if (currentUser?.role !== 'owner' && userEmail && bucket && bucket.owner_email !== userEmail) {
         // Get fresh member permissions from database
-        const memberResponse = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(userEmail)}/permissions?bucketName=${currentBucket}`);
+        const memberResponse = await fetch(`${API_BASE_URL}/api/members/${encodeURIComponent(userEmail)}/permissions?bucketName=${currentBucket}`);
         if (memberResponse.ok) {
           const memberData = await memberResponse.json();
           const freshPermissions = JSON.parse(memberData.permissions || '{}');
@@ -481,7 +482,7 @@ export default function FileManager() {
           if (freshPermissions.uploadViewOwn && !freshPermissions.uploadViewAll && !freshPermissions.viewOnly && !freshPermissions.viewDownload) {
             console.log('User can only view own files - filtering...');
             
-            const ownershipResponse = await fetch(`http://localhost:3001/api/files/ownership/${currentBucket}?userEmail=${encodeURIComponent(userEmail)}`);
+            const ownershipResponse = await fetch(`${API_BASE_URL}/api/files/ownership/${currentBucket}?userEmail=${encodeURIComponent(userEmail)}`);
             const ownedFiles = await ownershipResponse.json();
             const ownedFilePaths = new Set(ownedFiles.map(f => f.file_path));
             
@@ -503,7 +504,7 @@ export default function FileManager() {
             console.log('User can view all files - adding ownership info for permission checks');
             
             // Even for users who can view all files, we need ownership info for rename/delete permissions
-            const ownershipResponse = await fetch(`http://localhost:3001/api/files/ownership/${currentBucket}?userEmail=${encodeURIComponent(userEmail)}`);
+            const ownershipResponse = await fetch(`${API_BASE_URL}/api/files/ownership/${currentBucket}?userEmail=${encodeURIComponent(userEmail)}`);
             const ownedFiles = await ownershipResponse.json();
             const ownedFilePaths = new Set(ownedFiles.map(f => f.file_path));
             
@@ -538,7 +539,7 @@ export default function FileManager() {
   
   const checkOrganization = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/api/organizations/${currentBucket}`);
+      const response = await fetch(`${API_BASE_URL}/api/organizations/${currentBucket}`);
       const org = await response.json();
       setHasOrganization(!!org);
     } catch (error) {
@@ -551,7 +552,7 @@ export default function FileManager() {
     if (!orgName.trim()) return;
     
     try {
-      const response = await fetch('http://localhost:3001/api/organizations', {
+      const response = await fetch(`${API_BASE_URL}/api/organizations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -618,14 +619,14 @@ export default function FileManager() {
       if (ownerData) {
         // Owner can see all folders - get complete folder structure
         const owner = JSON.parse(ownerData);
-        const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/folders/tree?ownerEmail=${encodeURIComponent(owner.email)}`);
+        const response = await fetch(`${API_BASE_URL}/api/buckets/${currentBucket}/folders/tree?ownerEmail=${encodeURIComponent(owner.email)}`);
         const folders = await response.json();
         const tree = buildFolderTree(folders);
         setFolderTree(tree);
       } else if (memberData) {
         // Member can see all subfolders within their accessible scope
         const member = JSON.parse(memberData);
-        const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/folders/tree?memberEmail=${encodeURIComponent(member.email)}`);
+        const response = await fetch(`${API_BASE_URL}/api/buckets/${currentBucket}/folders/tree?memberEmail=${encodeURIComponent(member.email)}`);
         const folders = await response.json();
         const tree = buildFolderTree(folders);
         setFolderTree(tree);
@@ -698,7 +699,7 @@ export default function FileManager() {
     try {
       const oldFormatPermissions = convertToOldFormat(invitePermissions);
       
-      const response = await fetch('http://localhost:3001/api/invite', {
+      const response = await fetch(`${API_BASE_URL}/api/invite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -802,7 +803,7 @@ export default function FileManager() {
         };
       });
       
-      const response = await fetch('http://localhost:3001/api/download', {
+      const response = await fetch(`${API_BASE_URL}/api/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -860,7 +861,7 @@ export default function FileManager() {
 
   const performBulkDelete = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/delete', {
+      const response = await fetch(`${API_BASE_URL}/api/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -908,7 +909,7 @@ export default function FileManager() {
         };
       });
       
-      const response = await fetch('http://localhost:3001/api/share', {
+      const response = await fetch(`${API_BASE_URL}/api/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1139,7 +1140,7 @@ export default function FileManager() {
     
     // Generate preview URL with encoded file path
     const encodedFileId = encodeURIComponent(file.id);
-    const url = `http://localhost:3001/api/preview/${currentBucket}/${encodedFileId}?userEmail=${encodeURIComponent(currentUser?.email || '')}`;
+    const url = `${API_BASE_URL}/api/preview/${currentBucket}/${encodedFileId}?userEmail=${encodeURIComponent(currentUser?.email || '')}`;
     setPreviewFile(file);
     setPreviewUrl(url);
     setShowPreview(true);
@@ -1159,7 +1160,7 @@ export default function FileManager() {
     }
 
     try {
-      const response = await fetch('http://localhost:3001/api/download', {
+      const response = await fetch(`${API_BASE_URL}/api/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1205,7 +1206,7 @@ export default function FileManager() {
     }
 
     try {
-      const response = await fetch('http://localhost:3001/api/share', {
+      const response = await fetch(`${API_BASE_URL}/api/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1276,7 +1277,7 @@ export default function FileManager() {
     if (!newName || newName === file.name) return;
 
     try {
-      const response = await fetch('http://localhost:3001/api/rename', {
+      const response = await fetch(`${API_BASE_URL}/api/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1307,7 +1308,7 @@ export default function FileManager() {
       if (memberData) {
         try {
           const member = JSON.parse(memberData);
-          const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(member.email)}/permissions?bucketName=${currentBucket}`);
+          const response = await fetch(`${API_BASE_URL}/api/members/${encodeURIComponent(member.email)}/permissions?bucketName=${currentBucket}`);
           if (response.ok) {
             const updatedMemberData = await response.json();
             const refreshedMember = {
@@ -1371,7 +1372,7 @@ export default function FileManager() {
         userEmail: currentUser?.email
       };
       
-      const response = await fetch('http://localhost:3001/api/delete', {
+      const response = await fetch(`${API_BASE_URL}/api/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deletePayload)
@@ -1441,7 +1442,7 @@ export default function FileManager() {
     try {
       const endpoint = currentUser?.role === 'owner' ? '/api/owner/change-password' : '/api/member/change-password';
       
-      const response = await fetch(`http://localhost:3001${endpoint}`, {
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1627,7 +1628,7 @@ export default function FileManager() {
       const currentUserEmail = currentUser?.email;
       const isOwner = currentUser?.role === 'owner';
       
-      const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/members?userEmail=${encodeURIComponent(currentUserEmail)}&isOwner=${isOwner}`);
+      const response = await fetch(`${API_BASE_URL}/api/buckets/${currentBucket}/members?userEmail=${encodeURIComponent(currentUserEmail)}&isOwner=${isOwner}`);
       const members = await response.json();
       setAvailableMembers(members);
     } catch (error) {
@@ -1637,7 +1638,7 @@ export default function FileManager() {
 
   const handleCopyPermissions = async (memberEmail) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(memberEmail)}/permissions?bucketName=${currentBucket}`);
+      const response = await fetch(`${API_BASE_URL}/api/members/${encodeURIComponent(memberEmail)}/permissions?bucketName=${currentBucket}`);
       const memberData = await response.json();
       
       if (memberData.permissions) {
@@ -1733,7 +1734,7 @@ export default function FileManager() {
         return;
       }
       
-      const url = `http://localhost:3001/api/buckets/${currentBucket}/all-members?ownerEmail=${encodeURIComponent(ownerEmail)}`;
+      const url = `${API_BASE_URL}/api/buckets/${currentBucket}/all-members?ownerEmail=${encodeURIComponent(ownerEmail)}`;
       const response = await fetch(url);
       const members = await response.json();
       setAllMembers(members);
@@ -1842,7 +1843,7 @@ export default function FileManager() {
     try {
       const oldFormatPermissions = convertToOldFormat(editPermissions);
       
-      const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(editingMember.email)}/permissions`, {
+      const response = await fetch(`${API_BASE_URL}/api/members/${encodeURIComponent(editingMember.email)}/permissions`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1898,7 +1899,7 @@ export default function FileManager() {
   const performRemoveMember = async (member) => {
     
     try {
-      const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(member.email)}`, {
+      const response = await fetch(`${API_BASE_URL}/api/members/${encodeURIComponent(member.email)}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1951,7 +1952,7 @@ export default function FileManager() {
         return;
       }
       
-      const url = `http://localhost:3001/api/buckets/${currentBucket}/logs?ownerEmail=${encodeURIComponent(ownerEmail)}`;
+      const url = `${API_BASE_URL}/api/buckets/${currentBucket}/logs?ownerEmail=${encodeURIComponent(ownerEmail)}`;
       const response = await fetch(url);
       const logs = await response.json();
       setActivityLogs(logs);
@@ -2006,7 +2007,7 @@ export default function FileManager() {
         return;
       }
       
-      const response = await fetch(`http://localhost:3001/api/buckets/${currentBucket}/analytics?ownerEmail=${encodeURIComponent(userEmail)}`);
+      const response = await fetch(`${API_BASE_URL}/api/buckets/${currentBucket}/analytics?ownerEmail=${encodeURIComponent(userEmail)}`);
       
       if (!response.ok) {
         throw new Error(`Analytics request failed: ${response.status}`);
