@@ -2517,12 +2517,8 @@ app.get('/api/share/:shareId', async (req, res) => {
   const { shareId } = req.params;
   
   try {
-    const share = await new Promise((resolve, reject) => {
-      db.get('SELECT * FROM shares WHERE id = ? AND revoked = 0', [shareId], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const shareResult = await db.query('SELECT * FROM shares WHERE id = $1 AND revoked = false', [shareId]);
+    const share = shareResult.rows[0];
     
     if (!share) {
       return res.status(404).send(`
@@ -2550,13 +2546,10 @@ app.get('/api/share/:shareId', async (req, res) => {
     }
     
     // For multiple items or folders, redirect to React share viewer
-    return res.redirect(`http://localhost:8080/shared/${shareId}`);
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    return res.redirect(`${process.env.FRONTEND_URL}/shared/${shareId}`);
+    
+    const bucketResult = await db.query('SELECT access_key, secret_key, region FROM buckets WHERE name = $1', [share.bucket_name]);
+    const bucket = bucketResult.rows[0];
     
     if (!bucket) {
       return res.status(404).send('Bucket not found');
@@ -2629,23 +2622,15 @@ app.get('/api/share/:shareId/download/:fileKey(*)', async (req, res) => {
   const { shareId, fileKey } = req.params;
   
   try {
-    const share = await new Promise((resolve, reject) => {
-      db.get('SELECT * FROM shares WHERE id = ? AND revoked = 0', [shareId], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const shareResult = await db.query('SELECT * FROM shares WHERE id = $1 AND revoked = false', [shareId]);
+    const share = shareResult.rows[0];
     
     if (!share || new Date(share.expires_at) < new Date()) {
       return res.status(404).send('Share not found or expired');
     }
     
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const bucketResult = await db.query('SELECT access_key, secret_key, region FROM buckets WHERE name = $1', [share.bucket_name]);
+    const bucket = bucketResult.rows[0];
     
     const s3Client = new S3Client({
       region: bucket.region,
