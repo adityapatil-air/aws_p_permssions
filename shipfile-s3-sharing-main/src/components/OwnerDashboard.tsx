@@ -12,6 +12,7 @@ import { Plus, Settings, Users, BarChart3, Moon, Sun } from "lucide-react";
 import { useClerk } from "@clerk/clerk-react";
 import React from "react";
 import { useDarkMode } from '../hooks/use-dark-mode';
+import { API_BASE_URL } from '../config';
 
 import MemberManagement from "./MemberManagement";
 
@@ -81,7 +82,7 @@ export default function OwnerDashboard() {
       const ownerEmail = user?.primaryEmailAddress?.emailAddress;
       if (!ownerEmail) return;
       
-      const response = await fetch(`http://localhost:3001/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}`);
+      const response = await fetch(`${API_BASE_URL}/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}`);
       const data = await response.json();
       setBuckets(data.map((bucket: any) => ({
         id: bucket.id.toString(),
@@ -120,7 +121,7 @@ export default function OwnerDashboard() {
         throw new Error('User email not available');
       }
       
-      const response = await fetch('http://localhost:3001/api/buckets', {
+      const response = await fetch(`${API_BASE_URL}/api/buckets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accessKey, secretKey, region, bucketName, ownerEmail })
@@ -167,8 +168,8 @@ export default function OwnerDashboard() {
     try {
       const ownerEmail = user?.primaryEmailAddress?.emailAddress;
       const url = bucketName === 'ALL' 
-        ? `http://localhost:3001/api/analytics/complete?ownerEmail=${encodeURIComponent(ownerEmail || '')}`
-        : `http://localhost:3001/api/buckets/${bucketName}/analytics?ownerEmail=${encodeURIComponent(ownerEmail || '')}`;
+        ? `${API_BASE_URL}/api/analytics/complete?ownerEmail=${encodeURIComponent(ownerEmail || '')}`
+        : `${API_BASE_URL}/api/buckets/${bucketName}/analytics?ownerEmail=${encodeURIComponent(ownerEmail || '')}`;
       const response = await fetch(url);
       const data = await response.json();
       setAnalytics(data);

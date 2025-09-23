@@ -10,6 +10,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SignIn, useUser, useClerk } from '@clerk/clerk-react';
 import { useDarkMode } from '../hooks/use-dark-mode';
+import { API_BASE_URL } from '../config';
 
 const MemberAuth = () => {
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ const MemberAuth = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/member/login', {
+      const response = await fetch(`${API_BASE_URL}/api/member/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -70,7 +71,7 @@ const MemberAuth = () => {
   const handleGoogleLogin = async () => {
     if (isSignedIn && user?.primaryEmailAddress?.emailAddress) {
       try {
-        const response = await fetch('http://localhost:3001/api/member/google-login', {
+        const response = await fetch(`${API_BASE_URL}/api/member/google-login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: user.primaryEmailAddress.emailAddress })
