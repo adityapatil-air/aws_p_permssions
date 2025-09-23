@@ -121,13 +121,18 @@ export default function OwnerDashboard() {
         throw new Error('User email not available');
       }
       
+      console.log('Making request to:', `${API_BASE_URL}/api/buckets`);
+      console.log('Request data:', { accessKey: accessKey.substring(0, 4) + '...', secretKey: '***', region, bucketName, ownerEmail });
+      
       const response = await fetch(`${API_BASE_URL}/api/buckets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accessKey, secretKey, region, bucketName, ownerEmail })
       });
       
+      console.log('Response status:', response.status);
       const data = await response.json();
+      console.log('Response data:', data);
       
       if (!response.ok) {
         throw new Error(data.error || 'Failed to create bucket');
