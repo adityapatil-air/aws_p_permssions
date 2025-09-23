@@ -25,24 +25,13 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Database setup
-let dbConfig;
-if (process.env.NODE_ENV === 'production') {
-  dbConfig = {
-    connectionString: process.env.DATABASE_URL,
-    ssl: {
-      rejectUnauthorized: false,
-      sslmode: 'require'
-    }
-  };
-} else {
-  dbConfig = {
-    connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/shipfile',
-    ssl: process.env.DATABASE_URL ? {
-      rejectUnauthorized: false
-    } : false
-  };
-}
+// Database setup - PostgreSQL only
+const dbConfig = {
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? {
+    rejectUnauthorized: false
+  } : false
+};
 
 const db = new Pool(dbConfig);
 
