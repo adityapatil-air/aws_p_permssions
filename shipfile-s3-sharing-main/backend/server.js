@@ -26,16 +26,40 @@ app.use(cors({
 app.use(express.json());
 
 // Database setup
-const db = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
+let dbConfig;
+if (process.env.NODE_ENV === 'production') {
+  dbConfig = {
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+      rejectUnauthorized: false,
+      sslmode: 'require'
+    }
+  };
+} else {
+  dbConfig = {
+    connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/shipfile',
+    ssl: process.env.DATABASE_URL ? {
+      rejectUnauthorized: false
+    } : false
+  };
+}
+
+const db = new Pool(dbConfig);
 
 // Initialize database tables
 const initDB = async () => {
   try {
+    console.log('Initializing database connection...');
+    console.log('Database config:', {
+      hasConnectionString: !!process.env.DATABASE_URL,
+      nodeEnv: process.env.NODE_ENV,
+      sslEnabled: !!dbConfig.ssl
+    });
+    
+    // Test connection first
+    await db.query('SELECT NOW()');
+    console.log('Database connection successful');
+    
     await db.query(`CREATE TABLE IF NOT EXISTS buckets (
       id SERIAL PRIMARY KEY,
       name TEXT,
@@ -110,9 +134,15 @@ const initDB = async () => {
       timestamp TIMESTAMP NOT NULL
     )`);
     
-    console.log('Database tables initialized');
+    console.log('Database tables initialized successfully');
   } catch (error) {
-    console.error('Database initialization error:', error);
+    console.error('Database initialization error:', error.message);
+    console.error('Full error:', error);
+    
+    // Don't exit the process, let Vercel handle the error
+    if (process.env.NODE_ENV !== 'production') {
+      process.exit(1);
+    }
   }
 };
 
@@ -2959,6 +2989,29 @@ app.get('/api/buckets/:bucketName/analytics', async (req, res) => {
   }
 });
 
+// Test database connection
+app.get('/api/test-db', async (req, res) => {
+  try {
+    const result = await db.query('SELECT NOW() as current_time, version() as db_version');
+    res.json({
+      success: true,
+      message: 'Database connection successful',
+      data: result.rows[0],
+      config: {
+        hasConnectionString: !!process.env.DATABASE_URL,
+        nodeEnv: process.env.NODE_ENV,
+        sslEnabled: !!dbConfig.ssl
+      }
+    });
+  } catch (error) {
+    console.error('Database test failed:', error);
+    res.status(500).json({
+      error: 'Database connection failed: ' + error.message,
+      details: error.stack
+    });
+  }
+});
+
 // Test email configuration
 app.post('/api/test-email', async (req, res) => {
   const { testEmail } = req.body;
@@ -2999,10 +3052,35 @@ app.post('/api/test-email', async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    version: '1.0.0'
+  });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'ShipFile API Server',
+    status: 'Running',
+    endpoints: {
+      health: '/api/health',
+      testDb: '/api/test-db',
+      buckets: '/api/buckets'
+    }
+  });
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('Environment check:');
+  console.log('- NODE_ENV:', process.env.NODE_ENV);
+  console.log('- DATABASE_URL:', process.env.DATABASE_URL ? 'SET' : 'NOT SET');
   console.log('- SMTP_HOST:', process.env.SMTP_HOST);
   console.log('- SMTP_PORT:', process.env.SMTP_PORT);
   console.log('- SMTP_USER:', process.env.SMTP_USER ? 'SET' : 'NOT SET');
