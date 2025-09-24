@@ -119,6 +119,14 @@ db.serialize(() => {
     UNIQUE(bucket_name, file_path)
   )`);
   
+  // Create owners table for cross-machine login
+  db.run(`CREATE TABLE IF NOT EXISTS owners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE,
+    name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  
   // Create activity logs table
   db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -361,6 +369,47 @@ const checkPermission = (action) => {
   };
 };
 
+// Owner Google login - store in database
+app.post('/api/owner/google-login', async (req, res) => {
+  const { email, name } = req.body;
+  
+  try {
+    // Insert or update owner in database
+    db.run(
+      'INSERT OR REPLACE INTO owners (email, name) VALUES (?, ?)',
+      [email, name],
+      function(err) {
+        if (err) {
+          return res.status(500).json({ error: 'Failed to store owner data' });
+        }
+        
+        // Get owner's buckets
+        db.all('SELECT id, name, region, created_at FROM buckets WHERE owner_email = ?', [email], (err, buckets) => {
+          if (err) {
+            return res.status(500).json({ error: 'Database error' });
+          }
+          
+          const formattedBuckets = buckets.map(bucket => ({
+            id: bucket.id,
+            name: bucket.name,
+            region: bucket.region,
+            created: bucket.created_at.split(' ')[0]
+          }));
+          
+          res.json({
+            message: 'Owner login successful',
+            email: email,
+            name: name,
+            buckets: formattedBuckets
+          });
+        });
+      }
+    );
+  } catch (error) {
+    res.status(500).json({ error: 'Owner login failed' });
+  }
+});
+
 // Validate AWS credentials and create bucket
 app.post('/api/buckets', async (req, res) => {
   const { accessKey, secretKey, region, bucketName, ownerEmail } = req.body;
@@ -406,22 +455,33 @@ app.post('/api/buckets', async (req, res) => {
 
     await s3Client.send(corsCommand);
 
+    // Store bucket and ensure owner is in owners table
     db.run(
-      'INSERT INTO buckets (name, region, access_key, secret_key, owner_email) VALUES (?, ?, ?, ?, ?)',
-      [bucketName, region, accessKey, secretKey, ownerEmail],
-      function(err) {
-        if (err) {
-          if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ error: 'You already have a bucket with this name. Please choose a different name.' });
-          }
-          return res.status(500).json({ error: 'Database error: ' + err.message });
+      'INSERT OR REPLACE INTO owners (email) VALUES (?)',
+      [ownerEmail],
+      function(ownerErr) {
+        if (ownerErr) {
+          console.log('Owner insert warning:', ownerErr.message);
         }
-        res.json({ 
-          id: this.lastID,
-          name: bucketName,
-          region,
-          created: new Date().toISOString().split('T')[0]
-        });
+        
+        db.run(
+          'INSERT INTO buckets (name, region, access_key, secret_key, owner_email) VALUES (?, ?, ?, ?, ?)',
+          [bucketName, region, accessKey, secretKey, ownerEmail],
+          function(err) {
+            if (err) {
+              if (err.message.includes('UNIQUE constraint failed')) {
+                return res.status(400).json({ error: 'You already have a bucket with this name. Please choose a different name.' });
+              }
+              return res.status(500).json({ error: 'Database error: ' + err.message });
+            }
+            res.json({ 
+              id: this.lastID,
+              name: bucketName,
+              region,
+              created: new Date().toISOString().split('T')[0]
+            });
+          }
+        );
       }
     );
 
@@ -1697,7 +1757,7 @@ app.post('/api/invite/:token/accept', async (req, res) => {
   }
 });
 
-// Member login
+// Member login (email + password)
 app.post('/api/member/login', async (req, res) => {
   const { email, password } = req.body;
   
@@ -1720,8 +1780,9 @@ app.post('/api/member/login', async (req, res) => {
       }));
       
       res.json({
-        message: 'Login successful',
+        message: 'Member login successful',
         email: email,
+        isOwner: false,
         buckets: buckets
       });
     });
@@ -2505,33 +2566,64 @@ app.get('/api/files/ownership/:bucketName', async (req, res) => {
   }
 });
 
-// Member Google login
-app.post('/api/member/google-login', async (req, res) => {
-  const { email } = req.body;
+// Google login - handles both owners and members
+app.post('/api/google-login', async (req, res) => {
+  const { email, name } = req.body;
   
   try {
-    // Get all buckets this member belongs to
-    db.all('SELECT * FROM members WHERE email = ?', [email], (err, members) => {
+    // Check if user is an owner first
+    db.get('SELECT email FROM owners WHERE email = ?', [email], (err, owner) => {
       if (err) {
         return res.status(500).json({ error: 'Database error' });
       }
-      if (!members || members.length === 0) {
-        return res.status(401).json({ error: 'You are not a member of any organization. Please contact your administrator for an invitation.' });
+      
+      if (owner) {
+        // User is an owner, get their buckets
+        db.all('SELECT id, name, region, created_at FROM buckets WHERE owner_email = ?', [email], (err, buckets) => {
+          if (err) {
+            return res.status(500).json({ error: 'Database error' });
+          }
+          
+          const formattedBuckets = buckets.map(bucket => ({
+            id: bucket.id,
+            name: bucket.name,
+            region: bucket.region,
+            created: bucket.created_at.split(' ')[0]
+          }));
+          
+          return res.json({
+            message: 'Owner login successful',
+            email: email,
+            isOwner: true,
+            buckets: formattedBuckets
+          });
+        });
+      } else {
+        // Check if user is a member
+        db.all('SELECT * FROM members WHERE email = ?', [email], (err, members) => {
+          if (err) {
+            return res.status(500).json({ error: 'Database error' });
+          }
+          if (!members || members.length === 0) {
+            return res.status(401).json({ error: 'You are not a member of any organization. Please contact your administrator for an invitation.' });
+          }
+          
+          // Return all buckets the member has access to
+          const buckets = members.map(member => ({
+            bucketName: member.bucket_name,
+            permissions: member.permissions,
+            scopeType: member.scope_type,
+            scopeFolders: member.scope_folders
+          }));
+          
+          res.json({
+            message: 'Member login successful',
+            email: email,
+            isOwner: false,
+            buckets: buckets
+          });
+        });
       }
-      
-      // Return all buckets the member has access to
-      const buckets = members.map(member => ({
-        bucketName: member.bucket_name,
-        permissions: member.permissions,
-        scopeType: member.scope_type,
-        scopeFolders: member.scope_folders
-      }));
-      
-      res.json({
-        message: 'Google login successful',
-        email: email,
-        buckets: buckets
-      });
     });
   } catch (error) {
     res.status(500).json({ error: 'Google login failed' });
