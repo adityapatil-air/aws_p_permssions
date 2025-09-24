@@ -21,6 +21,23 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Health check endpoint for Railway
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    message: 'ShipFile Backend API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    message: 'ShipFile Backend API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Database setup
 const db = new sqlite3.Database(join(__dirname, 'shipfile.db'));
 db.serialize(() => {
