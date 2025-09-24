@@ -1,5 +1,4 @@
-import { API_BASE_URL } from '@/config/api';
-export const API_BASE_URL = import.meta.env.VITE_API_URL || '${API_BASE_URL}';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://awsppermssions-production.up.railway.app';
 
 export const apiEndpoints = {
   // Bucket endpoints
