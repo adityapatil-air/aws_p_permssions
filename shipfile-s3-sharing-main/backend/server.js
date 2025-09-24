@@ -38,13 +38,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Database setup with persistent SQLite
-const dbPath = process.env.NODE_ENV === 'production' 
-  ? '/app/data/shipfile.db'  // Railway volume path
-  : join(__dirname, 'shipfile.db');  // Local development
+// Database setup - Railway compatible
+const db = process.env.RAILWAY_ENVIRONMENT 
+  ? new sqlite3.Database(':memory:')  // In-memory for Railway
+  : new sqlite3.Database(join(__dirname, 'shipfile.db'));  // File for local
 
-const db = new sqlite3.Database(dbPath);
-console.log('SQLite database initialized at:', dbPath);
+console.log('SQLite database initialized:', process.env.RAILWAY_ENVIRONMENT ? 'in-memory' : 'file-based');
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS buckets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
