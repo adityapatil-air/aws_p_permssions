@@ -15,6 +15,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
 
+// Clean environment variables (Railway sometimes adds extra characters)
+if (process.env.SENDGRID_API_KEY) {
+  process.env.SENDGRID_API_KEY = process.env.SENDGRID_API_KEY.trim().replace(/^[^S]*/, '');
+}
+if (process.env.SMTP_PORT) {
+  process.env.SMTP_PORT = process.env.SMTP_PORT.replace(/[^0-9]/g, '');
+}
+if (process.env.SMTP_PASS) {
+  process.env.SMTP_PASS = process.env.SMTP_PASS.trim().replace(/^[^S]*/, '');
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
