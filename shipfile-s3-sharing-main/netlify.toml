@@ -1,7 +1,7 @@
 [build]
-  publish = "dist"
+  publish = "shipfile-s3-sharing-main/dist"
   command = "npm run build"
-  base = "."
+  base = "shipfile-s3-sharing-main"
 
 [[redirects]]
   from = "/*"
