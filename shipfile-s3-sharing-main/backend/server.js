@@ -135,7 +135,7 @@ db.serialize(() => {
 });
 
 // Email transporter setup
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT),
   auth: {
@@ -1513,7 +1513,7 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
               console.log('Sending email via SendGrid Web API...');
               const msg = {
                 to: email,
-                from: 'noreply@shipfile.com',
+                from: 'adityapatil.air@gmail.com', // Use verified sender
                 subject: "You've been invited to join ShipFile",
                 html: `
                   <h2>You've been invited to join ShipFile</h2>
@@ -1532,7 +1532,7 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
             } else if (transporter && process.env.SMTP_HOST) {
               console.log('Sending email via SMTP...');
               const mailOptions = {
-                from: '"ShipFile" <noreply@example.com>',
+                from: '"ShipFile" <adityapatil.air@gmail.com>',
                 to: email,
                 subject: "You've been invited to join ShipFile",
                 html: `
