@@ -419,7 +419,7 @@ app.post('/api/share', async (req, res) => {
             if (err) {
               return res.status(500).json({ error: 'Database error' });
             }
-            const shareUrl = `http://localhost:3001/api/share/${shareId}/download`;
+            const shareUrl = `${process.env.FRONTEND_URL}/api/share/${shareId}/download`;
             res.json({ shareUrl });
           }
         );

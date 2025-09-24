@@ -1149,7 +1149,7 @@ app.post('/api/share', checkPermission('share'), async (req, res) => {
               return res.status(500).json({ error: 'Database error' });
             }
             
-            const shareUrl = `http://localhost:3001/api/share/${shareId}`;
+            const shareUrl = `${process.env.FRONTEND_URL}/shared/${shareId}`;
             
             // Log share activity for multiple items
             const resourcePath = items.length === 1 ? items[0].key : `${items.length} items`;
@@ -2665,7 +2665,7 @@ app.post('/api/test-invite', async (req, res) => {
   
   try {
     // Simulate the invitation process
-    const response = await fetch('http://localhost:3001/api/invite', {
+    const response = await fetch(`http://localhost:${PORT}/api/invite`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(testData)
@@ -2759,7 +2759,7 @@ app.get('/api/share/:shareId', async (req, res) => {
     }
     
     // For multiple items or folders, redirect to React share viewer
-    return res.redirect(`http://localhost:8080/shared/${shareId}`);
+    return res.redirect(`${process.env.FRONTEND_URL}/shared/${shareId}`);
     const bucket = await new Promise((resolve, reject) => {
       db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [share.bucket_name], (err, row) => {
         if (err) reject(err);
