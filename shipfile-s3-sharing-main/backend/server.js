@@ -39,7 +39,21 @@ app.get('/health', (req, res) => {
 });
 
 // Database setup
-const db = new sqlite3.Database(join(__dirname, 'shipfile.db'));
+let db;
+if (process.env.DATABASE_URL) {
+  // Use PostgreSQL for production
+  console.log('Using PostgreSQL database');
+  const { Client } = await import('pg');
+  db = new Client.Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+  await db.connect();
+} else {
+  // Use SQLite for development
+  console.log('Using SQLite database');
+  db = new sqlite3.Database(join(__dirname, 'shipfile.db'));
+}
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS buckets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
