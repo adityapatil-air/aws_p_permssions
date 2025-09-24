@@ -1513,7 +1513,7 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
               console.log('Sending email via SendGrid Web API...');
               const msg = {
                 to: email,
-                from: 'adityapatil.air@gmail.com', // Use verified sender
+                from: 'nameisnanna@gmail.com', // SendGrid verified sender
                 subject: "You've been invited to join ShipFile",
                 html: `
                   <h2>You've been invited to join ShipFile</h2>
