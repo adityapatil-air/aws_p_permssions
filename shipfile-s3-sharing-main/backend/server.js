@@ -9,6 +9,7 @@ import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { Readable } from 'stream';
+import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -131,6 +132,16 @@ db.serialize(() => {
       console.log('Column created_by already exists or other error:', err.message);
     }
   });
+});
+
+// Email transporter setup
+const transporter = nodemailer.createTransporter({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT),
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
 });
 
 // SendGrid setup
@@ -1496,6 +1507,7 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
           try {
             console.log('Attempting to send email...');
             console.log('SendGrid API Key configured:', !!process.env.SENDGRID_API_KEY);
+            console.log('SMTP configured:', !!process.env.SMTP_HOST);
             
             if (process.env.SENDGRID_API_KEY) {
               console.log('Sending email via SendGrid Web API...');
@@ -1517,8 +1529,27 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
               console.log('Email send result:', result[0].statusCode);
               emailSent = true;
               console.log('Email sent successfully to:', email);
+            } else if (transporter && process.env.SMTP_HOST) {
+              console.log('Sending email via SMTP...');
+              const mailOptions = {
+                from: '"ShipFile" <noreply@example.com>',
+                to: email,
+                subject: "You've been invited to join ShipFile",
+                html: `
+                  <h2>You've been invited to join ShipFile</h2>
+                  <p>You have been invited to join the organization <strong>${org.name}</strong>.</p>
+                  <p>Click the link below to accept the invitation:</p>
+                  <a href="${inviteLink}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Accept Invitation</a>
+                  <p>This invitation will expire in 7 days.</p>
+                `
+              };
+              
+              const result = await transporter.sendMail(mailOptions);
+              console.log('Email send result:', result);
+              emailSent = true;
+              console.log('Email sent successfully to:', email);
             } else {
-              console.log('SendGrid API key not configured, providing invite link instead');
+              console.log('No email service configured, providing invite link instead');
             }
           } catch (emailError) {
             console.error('Email send failed - Full error:', emailError);
