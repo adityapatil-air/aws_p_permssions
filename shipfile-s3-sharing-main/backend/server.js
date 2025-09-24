@@ -9,7 +9,7 @@ import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { Readable } from 'stream';
-import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
@@ -133,15 +133,10 @@ db.serialize(() => {
   });
 });
 
-// Email transporter setup
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT),
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
+// SendGrid setup
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+}
 
 // Helper function to log activities
 const logActivity = (bucketName, userEmail, action, resourcePath, oldName = null, details = null) => {
@@ -1500,14 +1495,13 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
           let emailSent = false;
           try {
             console.log('Attempting to send email...');
-            console.log('Transporter configured:', !!transporter);
-            console.log('SMTP_HOST:', process.env.SMTP_HOST);
+            console.log('SendGrid API Key configured:', !!process.env.SENDGRID_API_KEY);
             
-            if (transporter && process.env.SMTP_HOST) {
-              console.log('Sending email via transporter...');
-              const mailOptions = {
-                from: '"ShipFile" <noreply@example.com>',
+            if (process.env.SENDGRID_API_KEY) {
+              console.log('Sending email via SendGrid Web API...');
+              const msg = {
                 to: email,
+                from: 'noreply@shipfile.com',
                 subject: "You've been invited to join ShipFile",
                 html: `
                   <h2>You've been invited to join ShipFile</h2>
@@ -1517,16 +1511,14 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
                   <p>This invitation will expire in 7 days.</p>
                 `
               };
-              console.log('Mail options:', mailOptions);
+              console.log('SendGrid message:', msg);
               
-              const result = await transporter.sendMail(mailOptions);
-              console.log('Email send result:', result);
+              const result = await sgMail.send(msg);
+              console.log('Email send result:', result[0].statusCode);
               emailSent = true;
               console.log('Email sent successfully to:', email);
             } else {
-              console.log('Email not configured, providing invite link instead');
-              console.log('Transporter exists:', !!transporter);
-              console.log('SMTP_HOST exists:', !!process.env.SMTP_HOST);
+              console.log('SendGrid API key not configured, providing invite link instead');
             }
           } catch (emailError) {
             console.error('Email send failed - Full error:', emailError);
