@@ -3,9 +3,12 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "npm start",
-    "healthcheckPath": "/",
-    "healthcheckTimeout": 100,
-    "restartPolicyType": "ON_FAILURE"
-  }
+    "startCommand": "npm start"
+  },
+  "volumes": [
+    {
+      "name": "sqlite-data",
+      "mountPath": "/app/data"
+    }
+  ]
 }
