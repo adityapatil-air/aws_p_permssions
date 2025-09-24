@@ -557,7 +557,7 @@ export default function FileManager() {
     if (!orgName.trim()) return;
     
     try {
-      const response = await fetch('${API_BASE_URL}/api/organizations', {
+      const response = await fetch(`${API_BASE_URL}/api/organizations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -710,7 +710,7 @@ export default function FileManager() {
     try {
       const oldFormatPermissions = convertToOldFormat(invitePermissions);
       
-      const response = await fetch('${API_BASE_URL}/api/invite', {
+      const response = await fetch(`${API_BASE_URL}/api/invite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -814,7 +814,7 @@ export default function FileManager() {
         };
       });
       
-      const response = await fetch('${API_BASE_URL}/api/download', {
+      const response = await fetch(`${API_BASE_URL}/api/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -872,7 +872,7 @@ export default function FileManager() {
 
   const performBulkDelete = async () => {
     try {
-      const response = await fetch('${API_BASE_URL}/api/delete', {
+      const response = await fetch(`${API_BASE_URL}/api/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -920,7 +920,7 @@ export default function FileManager() {
         };
       });
       
-      const response = await fetch('${API_BASE_URL}/api/share', {
+      const response = await fetch(`${API_BASE_URL}/api/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1171,7 +1171,7 @@ export default function FileManager() {
     }
 
     try {
-      const response = await fetch('${API_BASE_URL}/api/download', {
+      const response = await fetch(`${API_BASE_URL}/api/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1217,7 +1217,7 @@ export default function FileManager() {
     }
 
     try {
-      const response = await fetch('${API_BASE_URL}/api/share', {
+      const response = await fetch(`${API_BASE_URL}/api/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1288,7 +1288,7 @@ export default function FileManager() {
     if (!newName || newName === file.name) return;
 
     try {
-      const response = await fetch('${API_BASE_URL}/api/rename', {
+      const response = await fetch(`${API_BASE_URL}/api/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1383,7 +1383,7 @@ export default function FileManager() {
         userEmail: currentUser?.email
       };
       
-      const response = await fetch('${API_BASE_URL}/api/delete', {
+      const response = await fetch(`${API_BASE_URL}/api/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deletePayload)

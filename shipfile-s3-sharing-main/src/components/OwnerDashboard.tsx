@@ -121,7 +121,7 @@ export default function OwnerDashboard() {
         throw new Error('User email not available');
       }
       
-      const response = await fetch('${API_BASE_URL}/api/buckets', {
+      const response = await fetch(`${API_BASE_URL}/api/buckets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accessKey, secretKey, region, bucketName, ownerEmail })
