@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '@/config/api';
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -57,7 +58,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     setLoading(true);
     setError('');
     try {
-      const response = await fetch(`http://localhost:3001/api/buckets/${bucketName}/all-members?ownerEmail=${encodeURIComponent(ownerEmail)}`);
+      const response = await fetch(`${API_BASE_URL}/api/buckets/${bucketName}/all-members?ownerEmail=${encodeURIComponent(ownerEmail)}`);
       const data = await response.json();
       
       if (!response.ok) {
@@ -208,7 +209,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     try {
       const oldFormatPermissions = convertToOldFormat(editPermissions);
       
-      const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(editingMember.email)}/permissions`, {
+      const response = await fetch(`${API_BASE_URL}/api/members/${encodeURIComponent(editingMember.email)}/permissions`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -253,7 +254,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
 
   const performRemoveMember = async (member: Member) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(member.email)}`, {
+      const response = await fetch(`${API_BASE_URL}/api/members/${encodeURIComponent(member.email)}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bucketName })

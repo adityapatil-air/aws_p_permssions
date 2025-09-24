@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '@/config/api';
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -64,7 +65,7 @@ export default function ShareViewer() {
 
   const loadShareData = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/api/share/${shareId}`);
+      const response = await fetch(`${API_BASE_URL}/api/share/${shareId}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error);
@@ -80,7 +81,7 @@ export default function ShareViewer() {
 
   const loadFiles = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/api/share/${shareId}/list?prefix=${currentPath}`);
+      const response = await fetch(`${API_BASE_URL}/api/share/${shareId}/list?prefix=${currentPath}`);
       const data = await response.json();
       setFiles(data.files || []);
     } catch (error) {
@@ -97,7 +98,7 @@ export default function ShareViewer() {
   };
 
   const handleDownload = (filePath: string, fileName: string) => {
-    const downloadUrl = `http://localhost:3001/api/share/${shareId}/file/${filePath}`;
+    const downloadUrl = `${API_BASE_URL}/api/share/${shareId}/file/${filePath}`;
     const a = document.createElement('a');
     a.href = downloadUrl;
     a.download = fileName;
@@ -245,7 +246,7 @@ export default function ShareViewer() {
               <CardContent>
                 <div className="border rounded p-4 bg-white">
                   <iframe
-                    src={`http://localhost:3001/api/share/${shareId}/file/${previewFile}`}
+                    src={`${API_BASE_URL}/api/share/${shareId}/file/${previewFile}`}
                     className="w-full h-96"
                     title="File Preview"
                   />

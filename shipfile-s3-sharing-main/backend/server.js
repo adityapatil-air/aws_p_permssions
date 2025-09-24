@@ -801,9 +801,9 @@ app.get('/api/buckets/:bucketName/files', async (req, res) => {
       return res.status(403).json({ error: 'Access denied - authentication required' });
     }
 
-    // Check member permissions
+    // Check member permissions and apply filtering
     const member = await new Promise((resolve, reject) => {
-      db.get('SELECT scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
+      db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
         if (err) reject(err);
         else resolve(row);
       });
@@ -811,6 +811,69 @@ app.get('/api/buckets/:bucketName/files', async (req, res) => {
 
     if (!member) {
       return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Check if member can only view own files
+    const permissions = JSON.parse(member.permissions || '{}');
+    console.log('=== PERMISSION CHECK DEBUG ===');
+    console.log('User:', userEmail);
+    console.log('Bucket:', bucketName);
+    console.log('Raw permissions:', member.permissions);
+    console.log('Parsed permissions:', permissions);
+    console.log('uploadViewOwn:', permissions.uploadViewOwn);
+    console.log('uploadViewAll:', permissions.uploadViewAll);
+    console.log('viewOnly:', permissions.viewOnly);
+    console.log('viewDownload:', permissions.viewDownload);
+    
+    // Check if member should only see own files
+    // This happens when: uploadViewOwn=true OR (uploadOnly=true AND no view-all permissions)
+    const shouldFilterToOwnFiles = permissions.uploadViewOwn || 
+                                   (permissions.uploadOnly && !permissions.viewOnly && !permissions.viewDownload && !permissions.uploadViewAll);
+    
+    if (shouldFilterToOwnFiles) {
+      console.log('✅ Member should only see own files - filtering...');
+      
+      // Get files owned by this member
+      const ownedFiles = await new Promise((resolve) => {
+        db.all('SELECT file_path FROM file_ownership WHERE bucket_name = ? AND owner_email = ?', [bucketName, userEmail], (err, rows) => {
+          resolve(rows || []);
+        });
+      });
+      
+      const ownedFilePaths = new Set(ownedFiles.map(f => f.file_path));
+      console.log('Owned file paths for', userEmail, ':', Array.from(ownedFilePaths));
+      
+      // Filter items to only show owned files and folders
+      const filteredItems = items.filter(item => {
+        if (item.type === 'folder') return true; // Always show folders
+        return ownedFilePaths.has(item.id);
+      });
+      
+      console.log('Filtered items count:', filteredItems.length, 'from', items.length);
+      
+      // Apply folder scoping if needed
+      if (member.scope_type === 'specific') {
+        const allowedFolders = JSON.parse(member.scope_folders || '[]');
+        const scopedItems = filteredItems.filter(item => {
+          if (item.type === 'folder') {
+            if (!prefix) {
+              // Root directory - show virtual folders
+              return allowedFolders.some(folder => folder.startsWith(item.name));
+            } else {
+              // Inside folder - check if current path is allowed
+              const currentPath = prefix.replace(/\/$/, '');
+              return allowedFolders.some(folder => folder.startsWith(currentPath));
+            }
+          } else {
+            // For files, check if they're in allowed folders
+            const filePath = item.id;
+            return allowedFolders.some(folder => filePath.startsWith(folder));
+          }
+        });
+        return res.json(scopedItems);
+      }
+      
+      return res.json(filteredItems);
     }
 
     // Apply folder scoping

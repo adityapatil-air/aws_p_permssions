@@ -7,6 +7,7 @@ import {
   Download, Folder, File, Image, FileText, Archive, Music, Video, ArrowLeft, Eye
 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
+import { API_BASE_URL } from '@/config/api';
 
 interface FileItem {
   name: string;
@@ -56,7 +57,7 @@ export default function SharedFolder() {
       setError('');
       
       console.log('Loading shared content:', shareId);
-      const url = `http://localhost:3001/api/shared/${shareId}`;
+      const url = `${API_BASE_URL}/api/shared/${shareId}`;
       console.log('Request URL:', url);
       
       const response = await fetch(url);
@@ -93,7 +94,7 @@ export default function SharedFolder() {
 
   const handleDownload = (file: FileItem) => {
     const encodedKey = encodeURIComponent(file.key);
-    const downloadUrl = `http://localhost:3001/api/shared/${shareId}/download/${encodedKey}`;
+    const downloadUrl = `${API_BASE_URL}/api/shared/${shareId}/download/${encodedKey}`;
     window.open(downloadUrl, '_blank');
   };
 
@@ -111,7 +112,7 @@ export default function SharedFolder() {
     }
     
     const encodedKey = encodeURIComponent(file.key);
-    const previewUrl = `http://localhost:3001/api/shared/${shareId}/preview/${encodedKey}`;
+    const previewUrl = `${API_BASE_URL}/api/shared/${shareId}/preview/${encodedKey}`;
     window.open(previewUrl, '_blank');
   };
 

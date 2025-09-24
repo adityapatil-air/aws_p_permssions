@@ -1,6 +1,7 @@
+import { API_BASE_URL } from '@/config/api';
 import React, { useState } from 'react';
-
 import { Button } from '@/components/ui/button';
+import { useDarkMode } from '../hooks/use-dark-mode';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,7 +31,7 @@ const MemberAuth = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/member/login', {
+      const response = await fetch('${API_BASE_URL}/api/member/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -69,7 +70,7 @@ const MemberAuth = () => {
   const handleGoogleLogin = async () => {
     if (isSignedIn && user?.primaryEmailAddress?.emailAddress) {
       try {
-        const response = await fetch('http://localhost:3001/api/member/google-login', {
+        const response = await fetch('${API_BASE_URL}/api/member/google-login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: user.primaryEmailAddress.emailAddress })
