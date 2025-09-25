@@ -12,6 +12,7 @@ import { Readable } from 'stream';
 import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import { v4 as uuidv4 } from 'uuid';
+import database from './database.js';
 
 dotenv.config();
 
@@ -50,12 +51,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Database setup - Railway compatible
-const db = process.env.RAILWAY_ENVIRONMENT 
-  ? new sqlite3.Database(':memory:')  // In-memory for Railway
-  : new sqlite3.Database(join(__dirname, 'shipfile.db'));  // File for local
+// Database setup - Use imported database configuration
+const db = database;
 
-console.log('SQLite database initialized:', process.env.RAILWAY_ENVIRONMENT ? 'in-memory' : 'file-based');
+console.log('Database initialized:', process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite');
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS buckets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
