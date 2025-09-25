@@ -199,6 +199,10 @@ const dbWrapper = {
     pgSql = pgSql.replace(/BOOLEAN DEFAULT 0/g, 'BOOLEAN DEFAULT false');
     pgSql = pgSql.replace(/BOOLEAN DEFAULT 1/g, 'BOOLEAN DEFAULT true');
     
+    // Convert SQLite ? placeholders to PostgreSQL $1, $2, etc.
+    let paramIndex = 1;
+    pgSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
+    
     // Handle INSERT OR REPLACE
     if (pgSql.includes('INSERT OR REPLACE')) {
       pgSql = pgSql.replace('INSERT OR REPLACE', 'INSERT');
