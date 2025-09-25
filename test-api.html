@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ShipFile API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .result { margin: 10px 0; padding: 10px; background: #f5f5f5; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+        button { padding: 10px 20px; margin: 5px; }
+        input { padding: 8px; margin: 5px; width: 300px; }
+    </style>
+</head>
+<body>
+    <h1>ShipFile API Test</h1>
+    
+    <div class="test-section">
+        <h3>1. Health Check</h3>
+        <button onclick="testHealth()">Test Health</button>
+        <div id="health-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>2. Database Debug</h3>
+        <button onclick="testDatabase()">Test Database</button>
+        <button onclick="testCreateOwner()">Create Test Owner</button>
+        <div id="db-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>3. Owner Google Login</h3>
+        <input type="email" id="owner-email" placeholder="Owner Email" value="nameisnanna@gmail.com">
+        <input type="text" id="owner-name" placeholder="Owner Name" value="Test Owner">
+        <button onclick="testOwnerLogin()">Test Owner Login</button>
+        <div id="owner-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>4. Get Buckets</h3>
+        <input type="email" id="buckets-email" placeholder="Owner Email" value="nameisnanna@gmail.com">
+        <button onclick="testGetBuckets()">Get Buckets</button>
+        <div id="buckets-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>5. Create Bucket</h3>
+        <input type="text" id="bucket-name" placeholder="Bucket Name" value="test-bucket-" style="width: 200px;">
+        <input type="text" id="aws-region" placeholder="AWS Region" value="us-east-1" style="width: 150px;">
+        <br>
+        <input type="text" id="access-key" placeholder="AWS Access Key" value="test-key">
+        <input type="text" id="secret-key" placeholder="AWS Secret Key" value="test-secret">
+        <br>
+        <input type="email" id="bucket-owner" placeholder="Owner Email" value="nameisnanna@gmail.com">
+        <button onclick="testCreateBucket()">Create Bucket</button>
+        <div id="create-result" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://awsppermssions-production.up.railway.app';
+        
+        async function makeRequest(url, options = {}) {
+            try {
+                const response = await fetch(API_BASE + url, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                
+                const data = await response.json();
+                return { status: response.status, data, ok: response.ok };
+            } catch (error) {
+                return { status: 0, data: { error: error.message }, ok: false };
+            }
+        }
+        
+        function displayResult(elementId, result) {
+            const element = document.getElementById(elementId);
+            const className = result.ok ? 'success' : 'error';
+            element.className = `result ${className}`;
+            element.innerHTML = `
+                <strong>Status:</strong> ${result.status}<br>
+                <strong>Response:</strong><br>
+                <pre>${JSON.stringify(result.data, null, 2)}</pre>
+            `;
+        }
+        
+        async function testHealth() {
+            const result = await makeRequest('/health');
+            displayResult('health-result', result);
+        }
+        
+        async function testDatabase() {
+            const result = await makeRequest('/debug/db');
+            displayResult('db-result', result);
+        }
+        
+        async function testCreateOwner() {
+            const result = await makeRequest('/debug/test-owner', {
+                method: 'POST'
+            });
+            displayResult('db-result', result);
+        }
+        
+        async function testOwnerLogin() {
+            const email = document.getElementById('owner-email').value;
+            const name = document.getElementById('owner-name').value;
+            
+            const result = await makeRequest('/api/google-login', {
+                method: 'POST',
+                body: JSON.stringify({ email, name })
+            });
+            displayResult('owner-result', result);
+        }
+        
+        async function testGetBuckets() {
+            const email = document.getElementById('buckets-email').value;
+            const result = await makeRequest(`/api/buckets?ownerEmail=${encodeURIComponent(email)}`);
+            displayResult('buckets-result', result);
+        }
+        
+        async function testCreateBucket() {
+            const bucketName = document.getElementById('bucket-name').value + Date.now();
+            const region = document.getElementById('aws-region').value;
+            const accessKey = document.getElementById('access-key').value;
+            const secretKey = document.getElementById('secret-key').value;
+            const ownerEmail = document.getElementById('bucket-owner').value;
+            
+            const result = await makeRequest('/api/buckets', {
+                method: 'POST',
+                body: JSON.stringify({
+                    bucketName,
+                    region,
+                    accessKey,
+                    secretKey,
+                    ownerEmail
+                })
+            });
+            displayResult('create-result', result);
+        }
+        
+        // Auto-run health check on load
+        window.onload = () => {
+            testHealth();
+        };
+    </script>
+</body>
+</html>

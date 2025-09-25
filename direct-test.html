@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Direct API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .result { margin: 10px 0; padding: 10px; border: 1px solid #ddd; }
+        .success { background: #d4edda; }
+        .error { background: #f8d7da; }
+        button { padding: 10px 15px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Direct API Test - ShipFile System</h1>
+    
+    <button onclick="testAll()">Run All Tests</button>
+    <button onclick="clearResults()">Clear Results</button>
+    
+    <div id="results"></div>
+
+    <script>
+        const API_BASE = 'https://shipfile-s3-sharing-main-production.up.railway.app';
+        
+        function addResult(title, success, data) {
+            const div = document.createElement('div');
+            div.className = `result ${success ? 'success' : 'error'}`;
+            div.innerHTML = `
+                <h3>${success ? '✅' : '❌'} ${title}</h3>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+            document.getElementById('results').appendChild(div);
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+        
+        async function testEndpoint(name, url, options = {}) {
+            try {
+                console.log(`Testing ${name}:`, url);
+                const response = await fetch(url, options);
+                const data = await response.text();
+                
+                let parsedData;
+                try {
+                    parsedData = JSON.parse(data);
+                } catch (e) {
+                    parsedData = data;
+                }
+                
+                addResult(
+                    `${name} (${response.status})`, 
+                    response.ok, 
+                    {
+                        status: response.status,
+                        statusText: response.statusText,
+                        data: parsedData
+                    }
+                );
+                
+                return { success: response.ok, data: parsedData };
+            } catch (error) {
+                addResult(`${name} - Network Error`, false, { error: error.message });
+                return { success: false, error: error.message };
+            }
+        }
+        
+        async function testAll() {
+            clearResults();
+            
+            // Test 1: Basic health check
+            await testEndpoint('Health Check', `${API_BASE}/`);
+            
+            // Test 2: Health endpoint
+            await testEndpoint('Health Endpoint', `${API_BASE}/health`);
+            
+            // Test 3: Database debug
+            await testEndpoint('Database Debug', `${API_BASE}/debug/db`);
+            
+            // Test 4: Google Login
+            await testEndpoint('Google Login', `${API_BASE}/api/google-login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    email: 'test@example.com', 
+                    name: 'Test User' 
+                })
+            });
+            
+            // Test 5: Get Buckets
+            await testEndpoint('Get Buckets', `${API_BASE}/api/buckets?ownerEmail=test@example.com`);
+            
+            // Test 6: Test bucket creation (will fail without real AWS creds, but should show proper error)
+            await testEndpoint('Test Bucket Creation', `${API_BASE}/api/buckets`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accessKey: 'test-key',
+                    secretKey: 'test-secret',
+                    region: 'us-east-1',
+                    bucketName: 'test-bucket-' + Date.now(),
+                    ownerEmail: 'test@example.com'
+                })
+            });
+        }
+        
+        // Auto-run tests on page load
+        window.onload = () => {
+            setTimeout(testAll, 1000);
+        };
+    </script>
+</body>
+</html>

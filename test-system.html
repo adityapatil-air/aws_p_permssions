@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ShipFile System Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        button { padding: 10px 15px; margin: 5px; }
+        textarea { width: 100%; height: 100px; }
+        input { margin: 5px; padding: 5px; }
+    </style>
+</head>
+<body>
+    <h1>ShipFile System Comprehensive Test</h1>
+    
+    <div class="test-section">
+        <h3>1. Backend Health Check</h3>
+        <button onclick="testHealth()">Test Health</button>
+        <div id="health-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>2. Database Status</h3>
+        <button onclick="testDatabase()">Test Database</button>
+        <div id="db-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>3. Database Tables & Data</h3>
+        <button onclick="checkTables()">Check All Tables</button>
+        <div id="tables-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>4. Test Google Login</h3>
+        <input type="email" id="test-email" placeholder="Enter test email" value="test@example.com">
+        <input type="text" id="test-name" placeholder="Enter test name" value="Test User">
+        <button onclick="testGoogleLogin()">Test Google Login</button>
+        <div id="login-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>5. Test Bucket Creation</h3>
+        <input type="text" id="access-key" placeholder="AWS Access Key">
+        <input type="text" id="secret-key" placeholder="AWS Secret Key">
+        <input type="text" id="region" placeholder="Region (e.g., us-east-1)" value="us-east-1">
+        <input type="text" id="bucket-name" placeholder="Bucket Name">
+        <input type="email" id="owner-email" placeholder="Owner Email">
+        <button onclick="testBucketCreation()">Test Bucket Creation</button>
+        <div id="bucket-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>6. Get Buckets</h3>
+        <input type="email" id="get-owner-email" placeholder="Owner Email">
+        <button onclick="getBuckets()">Get Buckets</button>
+        <div id="get-buckets-result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://shipfile-s3-sharing-main-production.up.railway.app';
+
+        async function testHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                document.getElementById('health-result').innerHTML = 
+                    `<div class="success">✅ Health Check: ${JSON.stringify(data, null, 2)}</div>`;
+            } catch (error) {
+                document.getElementById('health-result').innerHTML = 
+                    `<div class="error">❌ Health Check Failed: ${error.message}</div>`;
+            }
+        }
+
+        async function testDatabase() {
+            try {
+                const response = await fetch(`${API_BASE}/debug/db`);
+                const data = await response.json();
+                document.getElementById('db-result').innerHTML = 
+                    `<div class="success">✅ Database Test: <pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+            } catch (error) {
+                document.getElementById('db-result').innerHTML = 
+                    `<div class="error">❌ Database Test Failed: ${error.message}</div>`;
+            }
+        }
+
+        async function checkTables() {
+            try {
+                // Check owners table
+                const ownersResponse = await fetch(`${API_BASE}/debug/db`);
+                const dbData = await ownersResponse.json();
+                
+                let result = '<div class="info">📊 Database Analysis:</div>';
+                
+                if (dbData.tests) {
+                    dbData.tests.forEach(test => {
+                        const status = test.success ? '✅' : '❌';
+                        result += `<div>${status} ${test.test}: ${test.success ? 'SUCCESS' : test.error}</div>`;
+                        if (test.result && Array.isArray(test.result)) {
+                            result += `<div style="margin-left: 20px;">Records: ${test.result.length}</div>`;
+                            if (test.result.length > 0) {
+                                result += `<pre style="margin-left: 20px; font-size: 12px;">${JSON.stringify(test.result.slice(0, 3), null, 2)}</pre>`;
+                            }
+                        }
+                    });
+                }
+                
+                document.getElementById('tables-result').innerHTML = result;
+            } catch (error) {
+                document.getElementById('tables-result').innerHTML = 
+                    `<div class="error">❌ Tables Check Failed: ${error.message}</div>`;
+            }
+        }
+
+        async function testGoogleLogin() {
+            const email = document.getElementById('test-email').value;
+            const name = document.getElementById('test-name').value;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/google-login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, name })
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('login-result').innerHTML = 
+                        `<div class="success">✅ Google Login Success: <pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+                } else {
+                    document.getElementById('login-result').innerHTML = 
+                        `<div class="error">❌ Google Login Failed: ${data.error}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('login-result').innerHTML = 
+                    `<div class="error">❌ Google Login Error: ${error.message}</div>`;
+            }
+        }
+
+        async function testBucketCreation() {
+            const accessKey = document.getElementById('access-key').value;
+            const secretKey = document.getElementById('secret-key').value;
+            const region = document.getElementById('region').value;
+            const bucketName = document.getElementById('bucket-name').value;
+            const ownerEmail = document.getElementById('owner-email').value;
+            
+            if (!accessKey || !secretKey || !bucketName || !ownerEmail) {
+                document.getElementById('bucket-result').innerHTML = 
+                    `<div class="error">❌ Please fill all fields</div>`;
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/buckets`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accessKey, secretKey, region, bucketName, ownerEmail })
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('bucket-result').innerHTML = 
+                        `<div class="success">✅ Bucket Created: <pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+                } else {
+                    document.getElementById('bucket-result').innerHTML = 
+                        `<div class="error">❌ Bucket Creation Failed: ${data.error}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('bucket-result').innerHTML = 
+                    `<div class="error">❌ Bucket Creation Error: ${error.message}</div>`;
+            }
+        }
+
+        async function getBuckets() {
+            const ownerEmail = document.getElementById('get-owner-email').value;
+            
+            if (!ownerEmail) {
+                document.getElementById('get-buckets-result').innerHTML = 
+                    `<div class="error">❌ Please enter owner email</div>`;
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('get-buckets-result').innerHTML = 
+                        `<div class="success">✅ Buckets Retrieved: <pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+                } else {
+                    document.getElementById('get-buckets-result').innerHTML = 
+                        `<div class="error">❌ Get Buckets Failed: ${data.error || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('get-buckets-result').innerHTML = 
+                    `<div class="error">❌ Get Buckets Error: ${error.message}</div>`;
+            }
+        }
+
+        // Auto-run health check on page load
+        window.onload = function() {
+            testHealth();
+            setTimeout(testDatabase, 1000);
+            setTimeout(checkTables, 2000);
+        };
+    </script>
+</body>
+</html>
