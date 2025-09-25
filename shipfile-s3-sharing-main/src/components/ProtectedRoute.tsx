@@ -22,6 +22,19 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requireAuth =
     );
   }
 
+  // For file manager, check if user has valid session (owner or member)
+  if (!requireAuth) {
+    const memberData = localStorage.getItem('currentMember');
+    const ownerData = localStorage.getItem('currentOwner');
+    
+    // If no valid session and not signed in, redirect to login
+    if (!memberData && !ownerData && !isSignedIn) {
+      return <Navigate to="/login" replace />;
+    }
+    
+    return <>{children}</>;
+  }
+
   // Redirect to login if authentication is required but user is not signed in
   if (requireAuth && !isSignedIn) {
     return <Navigate to="/owner-auth" replace />;

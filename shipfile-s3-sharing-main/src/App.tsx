@@ -35,7 +35,11 @@ const App = () => (
               <OwnerDashboard />
             </ProtectedRoute>
           } />
-          <Route path="/file-manager" element={<FileManager />} />
+          <Route path="/file-manager" element={
+            <ProtectedRoute requireAuth={false}>
+              <FileManager />
+            </ProtectedRoute>
+          } />
           <Route path="/accept-invite/:token" element={<AcceptInvite />} />
           <Route path="/shared-folder/:shareId" element={<SharedFolder />} />
           <Route path="/shared/:shareId" element={<SharedFolder />} />

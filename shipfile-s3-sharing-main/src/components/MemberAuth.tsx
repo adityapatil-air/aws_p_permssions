@@ -31,7 +31,7 @@ const MemberAuth = () => {
     setLoading(true);
 
     try {
-      const response = await fetch('${API_BASE_URL}/api/member/login', {
+      const response = await fetch(`${API_BASE_URL}/api/member/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -67,13 +67,29 @@ const MemberAuth = () => {
     }
   };
 
+  // Check for existing member data on component mount
+  React.useEffect(() => {
+    const existingMember = localStorage.getItem('currentMember');
+    if (existingMember && !isSignedIn) {
+      try {
+        const memberData = JSON.parse(existingMember);
+        setMember(memberData);
+      } catch (error) {
+        localStorage.removeItem('currentMember');
+      }
+    }
+  }, [isSignedIn]);
+
   const handleGoogleLogin = async () => {
     if (isSignedIn && user?.primaryEmailAddress?.emailAddress) {
       try {
-        const response = await fetch('${API_BASE_URL}/api/member/google-login', {
+        const response = await fetch(`${API_BASE_URL}/api/google-login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: user.primaryEmailAddress.emailAddress })
+          body: JSON.stringify({ 
+            email: user.primaryEmailAddress.emailAddress,
+            name: user.fullName || user.firstName || 'Member'
+          })
         });
 
         const data = await response.json();
@@ -91,7 +107,8 @@ const MemberAuth = () => {
         if (data.buckets && data.buckets.length > 0) {
           const memberData = {
             email: data.email,
-            buckets: data.buckets
+            buckets: data.buckets,
+            isOwner: data.isOwner || false
           };
           setMember(memberData);
           localStorage.setItem('currentMember', JSON.stringify(memberData));
@@ -110,10 +127,59 @@ const MemberAuth = () => {
   };
 
   React.useEffect(() => {
-    if (isSignedIn && !error) {
-      handleGoogleLogin();
-    }
-  }, [isSignedIn]);
+    const authenticateMember = async () => {
+      if (isSignedIn && user?.primaryEmailAddress?.emailAddress && !error) {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/google-login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              email: user.primaryEmailAddress.emailAddress,
+              name: user.fullName || user.firstName || 'Member'
+            })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            setError(data.error || 'You are not a member of any organization');
+            setTimeout(() => {
+              signOut();
+              setError('');
+            }, 3000);
+            return;
+          }
+
+          // Handle multiple buckets
+          if (data.buckets && data.buckets.length > 0) {
+            const memberData = {
+              email: data.email,
+              buckets: data.buckets,
+              isOwner: data.isOwner || false
+            };
+            setMember(memberData);
+            localStorage.setItem('currentMember', JSON.stringify(memberData));
+            
+            // If only one bucket, go directly to it
+            if (data.buckets.length === 1) {
+              navigate(`/file-manager?bucket=${data.buckets[0].bucketName}`);
+            }
+          } else {
+            throw new Error('No buckets found for this member');
+          }
+
+        } catch (error) {
+          setError('You are not a member of any organization');
+          setTimeout(() => {
+            signOut();
+            setError('');
+          }, 3000);
+        }
+      }
+    };
+    
+    authenticateMember();
+  }, [isSignedIn, user, error, signOut, navigate]);
 
   if (member) {
     return (
