@@ -126,7 +126,9 @@ const dbWrapper = {
   
   get: function(sql, params, callback) {
     if (isPostgreSQL) {
-      const queryPromise = this.client.query(sql, params);
+      // Convert SQLite syntax to PostgreSQL
+      let pgSql = this.convertSqlToPostgreSQL(sql);
+      const queryPromise = this.client.query(pgSql, params);
       if (queryPromise && queryPromise.then) {
         queryPromise
           .then(result => callback(null, result.rows[0] || null))
@@ -141,7 +143,9 @@ const dbWrapper = {
   
   all: function(sql, params, callback) {
     if (isPostgreSQL) {
-      const queryPromise = this.client.query(sql, params);
+      // Convert SQLite syntax to PostgreSQL
+      let pgSql = this.convertSqlToPostgreSQL(sql);
+      const queryPromise = this.client.query(pgSql, params);
       if (queryPromise && queryPromise.then) {
         queryPromise
           .then(result => callback(null, result.rows))
@@ -156,13 +160,10 @@ const dbWrapper = {
   
   run: function(sql, params, callback) {
     if (isPostgreSQL) {
-      // Convert SQLite INSERT OR REPLACE to PostgreSQL UPSERT
-      if (sql.includes('INSERT OR REPLACE')) {
-        sql = sql.replace('INSERT OR REPLACE', 'INSERT');
-        sql += ' ON CONFLICT DO NOTHING';
-      }
+      // Convert SQLite syntax to PostgreSQL
+      let pgSql = this.convertSqlToPostgreSQL(sql);
       
-      const queryPromise = this.client.query(sql, params);
+      const queryPromise = this.client.query(pgSql, params);
       if (queryPromise && queryPromise.then) {
         queryPromise
           .then(result => {
@@ -187,6 +188,24 @@ const dbWrapper = {
   
   serialize: function(callback) {
     if (callback) callback();
+  },
+  
+  convertSqlToPostgreSQL: function(sql) {
+    let pgSql = sql;
+    
+    // Convert SQLite syntax to PostgreSQL
+    pgSql = pgSql.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, 'SERIAL PRIMARY KEY');
+    pgSql = pgSql.replace(/DATETIME DEFAULT CURRENT_TIMESTAMP/g, 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+    pgSql = pgSql.replace(/BOOLEAN DEFAULT 0/g, 'BOOLEAN DEFAULT false');
+    pgSql = pgSql.replace(/BOOLEAN DEFAULT 1/g, 'BOOLEAN DEFAULT true');
+    
+    // Handle INSERT OR REPLACE
+    if (pgSql.includes('INSERT OR REPLACE')) {
+      pgSql = pgSql.replace('INSERT OR REPLACE', 'INSERT');
+      pgSql += ' ON CONFLICT DO NOTHING';
+    }
+    
+    return pgSql;
   }
 };
 
