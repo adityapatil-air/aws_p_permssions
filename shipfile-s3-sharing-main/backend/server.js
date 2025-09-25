@@ -1636,19 +1636,31 @@ app.post('/api/invite', checkPermission('invite'), async (req, res) => {
 app.get('/api/invite/:token', async (req, res) => {
   const { token } = req.params;
   
+  console.log('=== GET INVITATION DETAILS ===');
+  console.log('Token:', token);
+  
   try {
     db.get('SELECT i.*, o.name as org_name FROM invitations i JOIN organizations o ON i.bucket_name = o.bucket_name WHERE i.id = ? AND i.accepted = 0', [token], (err, invite) => {
+      console.log('Get invitation error:', err);
+      console.log('Invitation found:', !!invite);
+      
       if (err) {
-        return res.status(500).json({ error: 'Database error' });
+        console.error('Database error getting invitation details:', err);
+        return res.status(500).json({ error: 'Database error: ' + err.message });
       }
       if (!invite) {
+        console.log('No invitation found for token:', token);
         return res.status(404).json({ error: 'Invitation not found or already accepted' });
       }
       
+      console.log('Invitation details:', invite);
+      
       if (new Date(invite.expires_at) < new Date()) {
+        console.log('Invitation expired:', invite.expires_at);
         return res.status(410).json({ error: 'Invitation has expired' });
       }
       
+      console.log('✅ Returning invitation details');
       res.json({
         email: invite.email,
         permissions: invite.permissions,
@@ -1657,7 +1669,8 @@ app.get('/api/invite/:token', async (req, res) => {
       });
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get invitation' });
+    console.error('Get invitation error:', error);
+    res.status(500).json({ error: 'Failed to get invitation: ' + error.message });
   }
 });
 

@@ -163,10 +163,14 @@ const dbWrapper = {
       // Convert SQLite syntax to PostgreSQL
       let pgSql = this.convertSqlToPostgreSQL(sql);
       
+      console.log('PostgreSQL Query:', pgSql);
+      console.log('PostgreSQL Params:', params);
+      
       const queryPromise = this.client.query(pgSql, params);
       if (queryPromise && queryPromise.then) {
         queryPromise
           .then(result => {
+            console.log('PostgreSQL Result:', result);
             const mockThis = { 
               lastID: result.insertId || null,
               changes: result.rowCount || 0
@@ -174,6 +178,7 @@ const dbWrapper = {
             if (callback) callback.call(mockThis, null);
           })
           .catch(error => {
+            console.error('PostgreSQL Error:', error);
             if (callback) callback(error);
           });
       } else {
@@ -208,6 +213,16 @@ const dbWrapper = {
       pgSql = pgSql.replace('INSERT OR REPLACE', 'INSERT');
       pgSql += ' ON CONFLICT DO NOTHING';
     }
+    
+    // Handle boolean values in WHERE clauses
+    pgSql = pgSql.replace(/= 0(?=\s|$)/g, '= false');
+    pgSql = pgSql.replace(/= 1(?=\s|$)/g, '= true');
+    
+    // Handle UPDATE SET boolean values
+    pgSql = pgSql.replace(/SET accepted = 1/g, 'SET accepted = true');
+    pgSql = pgSql.replace(/SET accepted = 0/g, 'SET accepted = false');
+    pgSql = pgSql.replace(/SET revoked = 1/g, 'SET revoked = true');
+    pgSql = pgSql.replace(/SET revoked = 0/g, 'SET revoked = false');
     
     return pgSql;
   }
