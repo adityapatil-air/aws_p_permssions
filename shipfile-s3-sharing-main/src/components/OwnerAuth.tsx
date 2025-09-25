@@ -11,6 +11,13 @@ const OwnerAuth = () => {
   const { signOut } = useClerk();
   const navigate = useNavigate();
 
+  React.useEffect(() => {
+    if (isSignedIn && user?.primaryEmailAddress?.emailAddress) {
+      // Automatically redirect to dashboard when signed in
+      navigate('/owner-dashboard');
+    }
+  }, [isSignedIn, user, navigate]);
+
   if (isSignedIn) {
     return (
       <div className="min-h-screen bg-gradient-secondary flex items-center justify-center px-4">
@@ -38,7 +45,10 @@ const OwnerAuth = () => {
               Go to Dashboard
             </Button>
             <Button 
-              onClick={() => signOut()}
+              onClick={() => {
+                localStorage.removeItem('currentOwner');
+                signOut();
+              }}
               variant="outline" 
               className="w-full"
             >

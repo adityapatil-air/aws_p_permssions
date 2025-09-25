@@ -97,14 +97,49 @@ export default function OwnerDashboard() {
   }, [user?.primaryEmailAddress?.emailAddress]);
   
   React.useEffect(() => {
-    // Save owner email to localStorage when user data is available
-    if (user?.primaryEmailAddress?.emailAddress) {
-      localStorage.setItem('currentOwner', JSON.stringify({
-        email: user.primaryEmailAddress.emailAddress,
-        role: 'owner'
-      }));
-      loadBuckets();
-    }
+    const authenticateOwner = async () => {
+      if (user?.primaryEmailAddress?.emailAddress) {
+        try {
+          // Call backend to authenticate owner and get buckets
+          const response = await fetch(`${API_BASE_URL}/api/owner/google-login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: user.primaryEmailAddress.emailAddress,
+              name: user.fullName || user.firstName || 'Owner'
+            })
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            // Save owner data to localStorage
+            localStorage.setItem('currentOwner', JSON.stringify({
+              email: user.primaryEmailAddress.emailAddress,
+              role: 'owner'
+            }));
+            
+            // Set buckets from backend response
+            if (data.buckets) {
+              setBuckets(data.buckets.map((bucket: any) => ({
+                id: bucket.id.toString(),
+                name: bucket.name,
+                region: bucket.region,
+                created: bucket.created,
+                userCount: bucket.userCount || 0
+              })));
+            }
+          } else {
+            console.error('Failed to authenticate owner');
+            loadBuckets(); // Fallback to direct bucket loading
+          }
+        } catch (error) {
+          console.error('Owner authentication error:', error);
+          loadBuckets(); // Fallback to direct bucket loading
+        }
+      }
+    };
+    
+    authenticateOwner();
   }, [user, loadBuckets]);
 
   const handleAddBucket = async () => {
