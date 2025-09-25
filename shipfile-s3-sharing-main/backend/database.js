@@ -126,9 +126,14 @@ const dbWrapper = {
   
   get: function(sql, params, callback) {
     if (isPostgreSQL) {
-      this.client.query(sql, params)
-        .then(result => callback(null, result.rows[0] || null))
-        .catch(error => callback(error));
+      const queryPromise = this.client.query(sql, params);
+      if (queryPromise && queryPromise.then) {
+        queryPromise
+          .then(result => callback(null, result.rows[0] || null))
+          .catch(error => callback(error));
+      } else {
+        callback(null, null);
+      }
     } else {
       this.client.get(sql, params, callback);
     }
@@ -136,9 +141,14 @@ const dbWrapper = {
   
   all: function(sql, params, callback) {
     if (isPostgreSQL) {
-      this.client.query(sql, params)
-        .then(result => callback(null, result.rows))
-        .catch(error => callback(error));
+      const queryPromise = this.client.query(sql, params);
+      if (queryPromise && queryPromise.then) {
+        queryPromise
+          .then(result => callback(null, result.rows))
+          .catch(error => callback(error));
+      } else {
+        callback(null, []);
+      }
     } else {
       this.client.all(sql, params, callback);
     }
@@ -152,17 +162,24 @@ const dbWrapper = {
         sql += ' ON CONFLICT DO NOTHING';
       }
       
-      this.client.query(sql, params)
-        .then(result => {
-          const mockThis = { 
-            lastID: result.insertId || null,
-            changes: result.rowCount || 0
-          };
-          if (callback) callback.call(mockThis, null);
-        })
-        .catch(error => {
-          if (callback) callback(error);
-        });
+      const queryPromise = this.client.query(sql, params);
+      if (queryPromise && queryPromise.then) {
+        queryPromise
+          .then(result => {
+            const mockThis = { 
+              lastID: result.insertId || null,
+              changes: result.rowCount || 0
+            };
+            if (callback) callback.call(mockThis, null);
+          })
+          .catch(error => {
+            if (callback) callback(error);
+          });
+      } else {
+        // Handle synchronous case
+        const mockThis = { lastID: null, changes: 0 };
+        if (callback) callback.call(mockThis, null);
+      }
     } else {
       this.client.run(sql, params, callback);
     }

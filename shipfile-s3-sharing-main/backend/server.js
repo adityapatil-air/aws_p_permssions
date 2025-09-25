@@ -55,102 +55,91 @@ app.get('/health', (req, res) => {
 const db = database;
 
 console.log('Database initialized:', process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite');
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS buckets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    region TEXT,
-    access_key TEXT,
-    secret_key TEXT,
-    owner_email TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(name, owner_email)
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS shares (
-    id TEXT PRIMARY KEY,
-    bucket_name TEXT,
-    items TEXT,
-    permissions TEXT,
-    expires_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    revoked BOOLEAN DEFAULT 0
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS organizations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    bucket_name TEXT UNIQUE,
-    name TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS invitations (
-    id TEXT PRIMARY KEY,
-    bucket_name TEXT,
-    email TEXT,
-    permissions TEXT,
-    scope_type TEXT,
-    scope_folders TEXT,
-    expires_at DATETIME,
-    created_by TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    accepted BOOLEAN DEFAULT 0
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE,
-    password TEXT,
-    bucket_name TEXT,
-    permissions TEXT,
-    scope_type TEXT,
-    scope_folders TEXT,
-    invited_by TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-  
-  db.run(`CREATE TABLE IF NOT EXISTS file_ownership (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    bucket_name TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    owner_email TEXT NOT NULL,
-    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(bucket_name, file_path)
-  )`);
-  
-  // Create owners table for cross-machine login
-  db.run(`CREATE TABLE IF NOT EXISTS owners (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE,
-    name TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-  
-  // Create activity logs table
-  db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    bucket_name TEXT NOT NULL,
-    user_email TEXT NOT NULL,
-    action TEXT NOT NULL,
-    resource_path TEXT NOT NULL,
-    old_name TEXT,
-    details TEXT,
-    timestamp DATETIME NOT NULL
-  )`);
-  
-  // Add missing columns to existing tables
-  db.run(`ALTER TABLE members ADD COLUMN invited_by TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.log('Column invited_by already exists or other error:', err.message);
-    }
+// Tables are created in database.js for PostgreSQL
+// Skip SQLite table creation when using PostgreSQL
+if (!process.env.DATABASE_URL) {
+  db.serialize(() => {
+    db.run(`CREATE TABLE IF NOT EXISTS buckets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      region TEXT,
+      access_key TEXT,
+      secret_key TEXT,
+      owner_email TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(name, owner_email)
+    )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS shares (
+      id TEXT PRIMARY KEY,
+      bucket_name TEXT,
+      items TEXT,
+      permissions TEXT,
+      expires_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      revoked BOOLEAN DEFAULT 0
+    )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS organizations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bucket_name TEXT UNIQUE,
+      name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS invitations (
+      id TEXT PRIMARY KEY,
+      bucket_name TEXT,
+      email TEXT,
+      permissions TEXT,
+      scope_type TEXT,
+      scope_folders TEXT,
+      expires_at DATETIME,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      accepted BOOLEAN DEFAULT 0
+    )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE,
+      password TEXT,
+      bucket_name TEXT,
+      permissions TEXT,
+      scope_type TEXT,
+      scope_folders TEXT,
+      invited_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS file_ownership (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bucket_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      owner_email TEXT NOT NULL,
+      uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(bucket_name, file_path)
+    )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS owners (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE,
+      name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bucket_name TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      action TEXT NOT NULL,
+      resource_path TEXT NOT NULL,
+      old_name TEXT,
+      details TEXT,
+      timestamp DATETIME NOT NULL
+    )`);
   });
-  
-  db.run(`ALTER TABLE invitations ADD COLUMN created_by TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.log('Column created_by already exists or other error:', err.message);
-    }
-  });
-});
+}
 
 // Email transporter setup
 const transporter = nodemailer.createTransport({
