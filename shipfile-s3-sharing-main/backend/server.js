@@ -381,7 +381,7 @@ app.post('/api/owner/google-login', async (req, res) => {
             id: bucket.id,
             name: bucket.name,
             region: bucket.region,
-            created: bucket.created_at.split(' ')[0]
+            created: bucket.created_at ? new Date(bucket.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
           }));
           
           res.json({
@@ -511,7 +511,7 @@ app.get('/api/buckets', (req, res) => {
       id: row.id,
       name: row.name,
       region: row.region,
-      created: row.created_at.split(' ')[0]
+      created: row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
     }));
     
     // Get member count for each bucket
@@ -2576,7 +2576,7 @@ app.post('/api/google-login', async (req, res) => {
             id: bucket.id,
             name: bucket.name,
             region: bucket.region,
-            created: bucket.created_at.split(' ')[0]
+            created: bucket.created_at ? new Date(bucket.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
           }));
           
           return res.json({
