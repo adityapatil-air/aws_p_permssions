@@ -58,6 +58,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     setLoading(true);
     setError('');
     try {
+      console.log('Loading members for bucket:', bucketName, 'owner:', ownerEmail);
       const response = await fetch(`${API_BASE_URL}/api/buckets/${bucketName}/all-members?ownerEmail=${encodeURIComponent(ownerEmail)}`);
       const data = await response.json();
       
@@ -65,6 +66,7 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
         throw new Error(data.error || 'Failed to load members');
       }
       
+      console.log('Loaded members:', data);
       setMembers(data);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to load members');
@@ -233,21 +235,38 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     try {
       const oldFormatPermissions = convertToOldFormat(editPermissions);
       
+      console.log('=== UPDATING MEMBER PERMISSIONS ===');
+      console.log('Member:', editingMember.email);
+      console.log('Simplified permissions:', editPermissions);
+      console.log('Converted to old format:', oldFormatPermissions);
+      console.log('Scope type:', editScopeType);
+      console.log('Scope folders:', editSelectedFolders);
+      
+      const requestBody = {
+        bucketName: bucketName,
+        permissions: oldFormatPermissions,
+        scopeType: editScopeType,
+        scopeFolders: editSelectedFolders
+      };
+      
+      console.log('Request body:', requestBody);
+      
       const response = await fetch(`${API_BASE_URL}/api/members/${encodeURIComponent(editingMember.email)}/permissions`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bucketName: bucketName,
-          permissions: oldFormatPermissions,
-          scopeType: editScopeType,
-          scopeFolders: editSelectedFolders
-        })
+        body: JSON.stringify(requestBody)
       });
+      
+      console.log('Response status:', response.status);
       
       if (!response.ok) {
         const error = await response.json();
+        console.error('API error response:', error);
         throw new Error(error.error || 'Failed to update permissions');
       }
+      
+      const result = await response.json();
+      console.log('API success response:', result);
       
       setShowEditPermissions(false);
       setEditingMember(null);
