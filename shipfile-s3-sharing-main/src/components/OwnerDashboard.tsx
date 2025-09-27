@@ -102,6 +102,15 @@ function OwnerDashboardInner() {
     );
   }
 
+  // --- FIX: Prevent infinite loading by setting isInitialLoading to false if user is loaded but has no email ---
+  React.useEffect(() => {
+    // If user object is loaded (not undefined) but has no primaryEmailAddress, stop loading
+    if (user !== undefined && !user?.primaryEmailAddress?.emailAddress) {
+      setIsInitialLoading(false);
+    }
+  }, [user]);
+  // --- END FIX ---
+
   // Show loading state during initial load
   if (isInitialLoading) {
     return (
@@ -211,11 +220,12 @@ function OwnerDashboardInner() {
       loadBuckets().finally(() => {
         setIsInitialLoading(false);
       });
-    } else {
-      // If no user, still show dashboard (might be loading)
+    } else if (user !== undefined && !user?.primaryEmailAddress?.emailAddress) {
+      // --- FIX: Stop loading if user is loaded but no email ---
       setIsInitialLoading(false);
     }
-  }, [user?.primaryEmailAddress?.emailAddress]);
+    // else: still waiting for user object to load
+  }, [user?.primaryEmailAddress?.emailAddress, user]);
 
   const handleAddBucket = async () => {
     setError("");
