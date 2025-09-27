@@ -1,26 +1,33 @@
-import sqlite3 from 'sqlite3';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import database from './database.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const db = database;
 
-const db = new sqlite3.Database(join(__dirname, 'shipfile.db'));
+console.log('=== CHECKING MEMBERS IN DATABASE ===');
 
-console.log('🔍 Checking current members in database...');
-
-db.all('SELECT email, bucket_name, permissions, scope_type, scope_folders FROM members', (err, rows) => {
+db.all('SELECT email, bucket_name, permissions FROM members', (err, members) => {
   if (err) {
     console.error('Error:', err);
+    db.close();
+    return;
+  }
+  
+  console.log(`Found ${members.length} members:`);
+  
+  if (members.length === 0) {
+    console.log('❌ No members found in database');
   } else {
-    console.log(`Found ${rows.length} members:`);
-    rows.forEach((row, index) => {
-      console.log(`${index + 1}. Email: ${row.email}`);
-      console.log(`   Bucket: ${row.bucket_name}`);
-      console.log(`   Scope: ${row.scope_type || 'entire'}`);
-      console.log(`   Folders: ${row.scope_folders || 'all'}`);
-      console.log('');
+    members.forEach((member, index) => {
+      console.log(`\n${index + 1}. ${member.email} (${member.bucket_name})`);
+      console.log(`   Permissions: ${member.permissions}`);
+      
+      try {
+        const perms = JSON.parse(member.permissions);
+        console.log(`   Parsed:`, perms);
+      } catch (e) {
+        console.log(`   ❌ Invalid JSON: ${e.message}`);
+      }
     });
   }
+  
   db.close();
 });

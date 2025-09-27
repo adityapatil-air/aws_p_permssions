@@ -13,6 +13,7 @@ import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import { v4 as uuidv4 } from 'uuid';
 import database from './database.js';
+import { addPermissionRefreshEndpoint } from './fix_permission_sync_realtime.js';
 
 dotenv.config();
 
@@ -285,7 +286,7 @@ const isSubset = (inviterPerms, inviteePerms) => {
   return true;
 };
 
-// Permission checking middleware
+// Permission checking middleware with real-time database lookup
 const checkPermission = (action) => {
   return (req, res, next) => {
     const { bucketName, userEmail, items } = req.body;
@@ -294,32 +295,46 @@ const checkPermission = (action) => {
       return res.status(401).json({ error: 'User email required' });
     }
     
+    console.log(`🔍 Checking ${action} permission for ${userEmail} in ${bucketName}`);
+    
     db.get('SELECT owner_email FROM buckets WHERE name = ?', [bucketName], (err, bucket) => {
       if (err || !bucket) {
         return res.status(404).json({ error: 'Bucket not found' });
       }
       
       if (bucket.owner_email === userEmail) {
+        console.log('✅ User is owner - permission granted');
         return next();
       }
       
+      // ALWAYS fetch fresh permissions from database with enhanced logging
       db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, member) => {
-        if (err || !member) {
+        if (err) {
+          console.error('❌ Database error fetching member permissions:', err);
+          return res.status(500).json({ error: 'Database error checking permissions' });
+        }
+        
+        if (!member) {
+          console.log('❌ Member not found in database');
           return res.status(403).json({ error: `You do not have permission to perform ${action.toUpperCase()} on this bucket. Please contact the owner for access.` });
         }
+        
+        console.log('📋 Fresh permissions from database for', userEmail, ':', member.permissions);
+        console.log('📋 Scope type:', member.scope_type);
+        console.log('📋 Scope folders:', member.scope_folders);
         
         const permissions = JSON.parse(member.permissions);
         let hasPermission = false;
         
         switch (action) {
           case 'download':
-            hasPermission = permissions.viewDownload || permissions.uploadViewAll;
+            hasPermission = permissions.viewDownload || permissions.uploadViewAll || permissions.uploadViewOwn;
             break;
           case 'delete':
-            hasPermission = permissions.deleteFiles || permissions.deleteOwnFiles;
+            hasPermission = permissions.deleteFiles || permissions.deleteOwnFiles || permissions.uploadViewAll;
             break;
           case 'deleteOwn':
-            hasPermission = permissions.deleteOwnFiles;
+            hasPermission = permissions.deleteOwnFiles || permissions.uploadViewOwn;
             break;
           case 'share':
             hasPermission = permissions.generateLinks;
@@ -330,15 +345,23 @@ const checkPermission = (action) => {
           case 'invite':
             hasPermission = permissions.inviteMembers;
             break;
+          case 'upload':
+            hasPermission = permissions.uploadOnly || permissions.uploadViewOwn || permissions.uploadViewAll;
+            break;
         }
+        
+        console.log(`🎯 Permission check result for ${action}: ${hasPermission}`);
         
         if (!hasPermission) {
           let errorMsg = `You do not have permission to perform ${action.toUpperCase()} on this bucket. Please contact the owner for access.`;
           if (action === 'invite') {
             errorMsg = 'You do not have permission to invite members. Please contact the owner for access.';
           }
+          console.log('❌ Permission denied:', errorMsg);
           return res.status(403).json({ error: errorMsg });
         }
+        
+        console.log('✅ Permission granted');
         
         // For invite action, store member permissions for validation
         if (action === 'invite') {
@@ -533,7 +556,7 @@ app.get('/api/buckets', (req, res) => {
   });
 });
 
-// Get buckets for member
+// Get buckets for member (with fresh permissions)
 app.get('/api/member/buckets', (req, res) => {
   const { memberEmail } = req.query;
   
@@ -541,24 +564,37 @@ app.get('/api/member/buckets', (req, res) => {
     return res.status(400).json({ error: 'Member email is required' });
   }
   
+  console.log(`🔄 Fetching fresh bucket permissions for ${memberEmail}`);
+  
   db.all('SELECT bucket_name, permissions, scope_type, scope_folders FROM members WHERE email = ?', [memberEmail], (err, rows) => {
     if (err) {
+      console.error('Database error:', err);
       return res.status(500).json({ error: 'Database error' });
     }
     
-    const buckets = rows.map(row => ({
-      bucketName: row.bucket_name,
-      permissions: row.permissions,
-      scopeType: row.scope_type,
-      scopeFolders: row.scope_folders
-    }));
+    console.log(`Found ${rows.length} buckets for member`);
+    
+    const buckets = rows.map(row => {
+      console.log(`Bucket ${row.bucket_name} permissions:`, row.permissions);
+      return {
+        bucketName: row.bucket_name,
+        permissions: row.permissions,
+        scopeType: row.scope_type,
+        scopeFolders: row.scope_folders
+      };
+    });
+    
+    // Prevent caching
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     
     res.json(buckets);
   });
 });
 
 // Generate pre-signed upload URL
-app.post('/api/upload-url', async (req, res) => {
+app.post('/api/upload-url', checkPermission('upload'), async (req, res) => {
   const { bucketName, fileName, fileType, folderPath = '', userEmail } = req.body;
 
   try {
@@ -2504,27 +2540,41 @@ app.get('/api/members/:email/permissions', async (req, res) => {
   }
 });
 
-// Get member's bucket-specific permissions
+// Get member's bucket-specific permissions (with cache prevention)
 app.get('/api/member/:email/bucket/:bucketName', async (req, res) => {
   const { email, bucketName } = req.params;
 
   try {
+    console.log(`🔄 Fetching fresh permissions for ${email} in ${bucketName}`);
+    
     db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
       [email, bucketName], (err, member) => {
       if (err) {
+        console.error('Database error:', err);
         return res.status(500).json({ error: 'Database error' });
       }
       if (!member) {
+        console.log('Member not found');
         return res.status(404).json({ error: 'Member not found in this bucket' });
       }
+      
+      console.log('Fresh permissions from DB:', member.permissions);
+      
+      // Prevent caching
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      
       res.json({
         bucketName: bucketName,
         permissions: member.permissions,
         scopeType: member.scope_type,
-        scopeFolders: member.scope_folders
+        scopeFolders: member.scope_folders,
+        timestamp: new Date().toISOString()
       });
     });
   } catch (error) {
+    console.error('Error getting member permissions:', error);
     res.status(500).json({ error: 'Failed to get member bucket permissions' });
   }
 });
@@ -2680,12 +2730,12 @@ app.post('/api/member/change-password', async (req, res) => {
   }
 });
 
-// Update member permissions (owner only)
+// Update member permissions (owner only) - Enhanced with real-time sync
 app.put('/api/members/:email/permissions', async (req, res) => {
   const { email } = req.params;
   const { bucketName, permissions, scopeType, scopeFolders } = req.body;
   
-  console.log('=== UPDATE MEMBER PERMISSIONS ===');
+  console.log('=== UPDATE MEMBER PERMISSIONS (ENHANCED) ===');
   console.log('Member email:', email);
   console.log('Bucket:', bucketName);
   console.log('New permissions:', permissions);
@@ -2707,47 +2757,68 @@ app.put('/api/members/:email/permissions', async (req, res) => {
     
     console.log('Existing member data:', existingMember);
     
-    // Update the member permissions
-    db.run(
-      'UPDATE members SET permissions = ?, scope_type = ?, scope_folders = ? WHERE email = ? AND bucket_name = ?',
-      [JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders), email, bucketName],
-      function(err) {
-        if (err) {
-          console.error('Database error updating member:', err);
-          return res.status(500).json({ error: 'Failed to update member permissions' });
-        }
-        
-        console.log('Database update result - changes:', this.changes);
-        
-        if (this.changes === 0) {
-          return res.status(404).json({ error: 'Member not found or no changes made' });
-        }
-        
-        console.log('✅ Member permissions updated successfully');
-        
-        // Verify the update by fetching the updated record
-        db.get('SELECT email, permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
-          [email, bucketName], (err, updatedMember) => {
+    // Ensure permissions are properly stringified
+    const permissionsJson = typeof permissions === 'string' ? permissions : JSON.stringify(permissions);
+    const scopeFoldersJson = typeof scopeFolders === 'string' ? scopeFolders : JSON.stringify(scopeFolders || []);
+    
+    console.log('Stringified permissions:', permissionsJson);
+    console.log('Stringified scope folders:', scopeFoldersJson);
+    
+    // Update the member permissions with transaction-like behavior
+    const updateResult = await new Promise((resolve, reject) => {
+      db.run(
+        'UPDATE members SET permissions = ?, scope_type = ?, scope_folders = ? WHERE email = ? AND bucket_name = ?',
+        [permissionsJson, scopeType || 'entire', scopeFoldersJson, email, bucketName],
+        function(err) {
           if (err) {
-            console.error('Error verifying update:', err);
+            console.error('Database error updating member:', err);
+            reject(err);
           } else {
-            console.log('Updated member data:', updatedMember);
+            console.log('Database update result - changes:', this.changes);
+            resolve({ changes: this.changes });
           }
-          
-          // Log permission change activity
-          logActivity(bucketName, 'owner', 'permission_change', email, null, 'Permissions updated');
-          
-          res.json({ 
-            success: true, 
-            message: 'Permissions updated successfully',
-            updatedMember: updatedMember
-          });
-        });
-      }
-    );
+        }
+      );
+    });
+    
+    if (updateResult.changes === 0) {
+      return res.status(404).json({ error: 'Member not found or no changes made' });
+    }
+    
+    console.log('✅ Member permissions updated successfully');
+    
+    // Verify the update by fetching the updated record
+    const updatedMember = await new Promise((resolve, reject) => {
+      db.get('SELECT email, permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
+        [email, bucketName], (err, row) => {
+        if (err) {
+          console.error('Error verifying update:', err);
+          reject(err);
+        } else {
+          console.log('✅ Verified updated member data:', row);
+          resolve(row);
+        }
+      });
+    });
+    
+    // Log permission change activity
+    logActivity(bucketName, 'owner', 'permission_change', email, null, 'Permissions updated');
+    
+    // Set cache control headers to prevent caching
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    res.json({ 
+      success: true, 
+      message: 'Permissions updated successfully',
+      updatedMember: updatedMember,
+      timestamp: new Date().toISOString()
+    });
+    
   } catch (error) {
     console.error('Error updating member permissions:', error);
-    res.status(500).json({ error: 'Failed to update permissions' });
+    res.status(500).json({ error: 'Failed to update permissions: ' + error.message });
   }
 });
 
@@ -3568,6 +3639,9 @@ app.post('/api/test-email', async (req, res) => {
     });
   }
 });
+
+// Add permission refresh endpoints
+addPermissionRefreshEndpoint(app);
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

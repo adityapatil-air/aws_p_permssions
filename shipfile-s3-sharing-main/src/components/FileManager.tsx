@@ -1514,6 +1514,45 @@ export default function FileManager() {
     }
   };
 
+  // Function to refresh member permissions from server
+  const refreshMemberPermissions = async () => {
+    const memberData = localStorage.getItem('currentMember');
+    if (!memberData) return;
+    
+    try {
+      const member = JSON.parse(memberData);
+      console.log('🔄 Refreshing member permissions from server...');
+      
+      // Get fresh permissions from server
+      const response = await fetch(`${API_BASE_URL}/api/member/${encodeURIComponent(member.email)}/permissions/refresh?bucketName=${currentBucket}`, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
+      if (response.ok) {
+        const freshData = await response.json();
+        console.log('✅ Got fresh permissions:', freshData.permissions);
+        
+        // Update localStorage with fresh permissions
+        const updatedMember = {
+          ...member,
+          permissions: freshData.permissions,
+          scopeType: freshData.scopeType,
+          scopeFolders: freshData.scopeFolders
+        };
+        
+        localStorage.setItem('currentMember', JSON.stringify(updatedMember));
+        setUserPermissions(JSON.parse(freshData.permissions || '{}'));
+        
+        console.log('✅ Member permissions refreshed successfully');
+      }
+    } catch (error) {
+      console.error('Failed to refresh member permissions:', error);
+    }
+  };
+
   // Load user data on component mount
   React.useEffect(() => {
     const memberData = localStorage.getItem('currentMember');
@@ -1533,6 +1572,9 @@ export default function FileManager() {
         // Backward compatibility
         setUserPermissions(JSON.parse(member.permissions || '{}'));
       }
+      
+      // Refresh permissions from server to ensure they're up to date
+      refreshMemberPermissions();
     } else if (ownerData) {
       const owner = JSON.parse(ownerData);
       setCurrentUser({ email: owner.email, role: 'owner' });
@@ -1547,6 +1589,19 @@ export default function FileManager() {
       checkOrganization();
     }
   }, [currentBucket, currentPath]);
+  
+  // Refresh permissions periodically for members
+  React.useEffect(() => {
+    const memberData = localStorage.getItem('currentMember');
+    if (!memberData) return;
+    
+    // Set up periodic permission refresh every 30 seconds
+    const interval = setInterval(() => {
+      refreshMemberPermissions();
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, [currentBucket]);
 
   React.useEffect(() => {
     if (showInvite && scopeType === 'specific') {

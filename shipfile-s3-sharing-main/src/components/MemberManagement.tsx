@@ -309,9 +309,22 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       // Immediately reload members to show updated permissions
       await loadMembers();
       
+      // Trigger a permission refresh for the updated member
+      try {
+        await fetch(`${API_BASE_URL}/api/member/${encodeURIComponent(editingMember.email)}/permissions/refresh?bucketName=${bucketName}`, {
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          }
+        });
+        console.log('✅ Triggered permission refresh for member');
+      } catch (error) {
+        console.error('Failed to trigger permission refresh:', error);
+      }
+      
       toast({
         title: "Permissions Updated",
-        description: `Permissions successfully updated for ${editingMember?.email}`,
+        description: `Permissions successfully updated for ${editingMember?.email}. Changes will be visible immediately.`,
         className: "bg-green-100 border-green-400 text-green-800"
       });
       
