@@ -15,7 +15,7 @@ import React from "react";
 import { useDarkMode } from '../hooks/use-dark-mode';
 
 import MemberManagement from "./MemberManagement";
-import { useToast } from '../hooks/use-toast';
+import { useToast } from '@/hooks/use-toast';
 
 interface Bucket {
   id: string;
@@ -56,10 +56,13 @@ const AWS_REGIONS = [
   { value: "ap-east-1", label: "Asia Pacific (Hong Kong)" }
 ];
 
-export default function OwnerDashboard() {
+function OwnerDashboardInner() {
   const { signOut, user } = useClerk();
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const { toast } = useToast();
+
+  // Add error state
+  const [componentError, setComponentError] = useState<string | null>(null);
 
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [showAddBucket, setShowAddBucket] = useState(false);
@@ -79,6 +82,37 @@ export default function OwnerDashboard() {
   const [selectedBucketForMembers, setSelectedBucketForMembers] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+
+  // If there's a component error, show error UI
+  if (componentError) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h1>
+          <p className="text-gray-600 mb-4">{componentError}</p>
+          <Button onClick={() => {
+            setComponentError(null);
+            window.location.reload();
+          }}>
+            Reload Page
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state during initial load
+  if (isInitialLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Auto-refresh buckets every 30 seconds to catch member count updates
   React.useEffect(() => {
@@ -89,7 +123,7 @@ export default function OwnerDashboard() {
     }, 30000); // Refresh every 30 seconds
 
     return () => clearInterval(interval);
-  }, [loadBuckets, user?.primaryEmailAddress?.emailAddress]);
+  }, [user?.primaryEmailAddress?.emailAddress]);
 
 
   const loadBuckets = React.useCallback(async (showLoading = false) => {
@@ -119,6 +153,7 @@ export default function OwnerDashboard() {
       setLastRefresh(new Date());
     } catch (error) {
       console.error('Failed to load buckets:', error);
+      setComponentError('Failed to load buckets. Please try refreshing the page.');
     } finally {
       if (showLoading) setIsRefreshing(false);
     }
@@ -163,7 +198,11 @@ export default function OwnerDashboard() {
         } catch (error) {
           console.error('Owner authentication error:', error);
           loadBuckets(); // Fallback to direct bucket loading
+        } finally {
+          setIsInitialLoading(false);
         }
+      } else {
+        setIsInitialLoading(false);
       }
     };
     
@@ -726,4 +765,26 @@ export default function OwnerDashboard() {
       </footer>
     </div>
   );
+}
+
+export default function OwnerDashboard() {
+  try {
+    return <OwnerDashboardInner />;
+  } catch (error) {
+    console.error('OwnerDashboard render error:', error);
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Dashboard Error</h1>
+          <p className="text-gray-600 mb-4">Failed to load the dashboard. Please try refreshing the page.</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Reload Page
+          </button>
+        </div>
+      </div>
+    );
+  }
 }

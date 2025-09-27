@@ -11,6 +11,7 @@ import OwnerAuth from "./components/OwnerAuth";
 import MemberAuth from "./components/MemberAuth";
 import OwnerBucketSetup from "./components/OwnerBucketSetup";
 import OwnerDashboard from "./components/OwnerDashboard";
+import OwnerDashboardSimple from "./components/OwnerDashboardSimple";
 import FileManager from "./components/FileManager";
 import AcceptInvite from "./components/AcceptInvite";
 import SharedFolder from "./components/SharedFolder";
@@ -33,6 +34,11 @@ const App = () => (
           <Route path="/owner-dashboard" element={
             <ProtectedRoute>
               <OwnerDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/owner-dashboard-simple" element={
+            <ProtectedRoute>
+              <OwnerDashboardSimple />
             </ProtectedRoute>
           } />
           <Route path="/file-manager" element={
