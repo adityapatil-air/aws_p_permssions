@@ -270,11 +270,15 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       
       setShowEditPermissions(false);
       setEditingMember(null);
-      loadMembers();
+      
+      // Force a complete refresh to ensure changes are reflected
+      setTimeout(() => {
+        loadMembers();
+      }, 500);
       
       toast({
         title: "Permissions Updated",
-        description: `Permissions updated for ${editingMember?.email}`,
+        description: `Permissions updated for ${editingMember?.email}. Changes may take a moment to reflect.`,
         className: "bg-green-100 border-green-400 text-green-800"
       });
       
