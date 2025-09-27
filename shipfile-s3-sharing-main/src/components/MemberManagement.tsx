@@ -188,10 +188,17 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       old.viewDownload = false;
     }
     
-    // Handle extra permissions
-    if (simplified.share) old.generateLinks = true;
-    if (simplified.create_folder) old.createFolder = true;
-    if (simplified.invite_members) old.inviteMembers = true;
+    // Handle extra permissions - ALWAYS set these regardless of other permissions
+    old.generateLinks = Boolean(simplified.share);
+    old.createFolder = Boolean(simplified.create_folder);
+    old.inviteMembers = Boolean(simplified.invite_members);
+    
+    // Ensure download permission is preserved for upload users
+    if (simplified.upload !== 'none') {
+      old.viewDownload = true;
+    } else if (simplified.download) {
+      old.viewDownload = true;
+    }
 
     return old;
   };
