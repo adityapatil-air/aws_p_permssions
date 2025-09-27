@@ -266,44 +266,71 @@ export default function OwnerDashboard() {
             </Button>
           </div>
 
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Bucket Name</TableHead>
-                    <TableHead>Region</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Users</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {buckets.map((bucket) => (
-                    <TableRow key={bucket.id} className="cursor-pointer hover:bg-gray-50" onClick={() => window.location.href = `/file-manager?bucket=${bucket.name}`}>
-                      <TableCell className="font-medium">{bucket.name}</TableCell>
-                      <TableCell>{bucket.region}</TableCell>
-                      <TableCell>{bucket.created}</TableCell>
-                      <TableCell>{bucket.userCount}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleAnalyticsClick(bucket.name); }}>
-                            <BarChart3 className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setSelectedBucketForMembers(bucket.name); setShowMemberManagement(true); }}>
-                            <Users className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="outline">
-                            <Settings className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
+          {buckets.length === 0 ? (
+            <Card className="text-center py-12">
+              <CardContent>
+                <div className="mx-auto mb-4 p-4 bg-blue-50 rounded-full w-fit">
+                  <Plus className="h-8 w-8 text-blue-600" />
+                </div>
+                <CardTitle className="text-xl mb-2">No Buckets Found</CardTitle>
+                <p className="text-gray-600 mb-6">
+                  Get started by creating your first S3 bucket. You'll need your AWS access keys to begin.
+                </p>
+                <div className="space-y-3 text-sm text-gray-500 mb-6">
+                  <p>📋 <strong>What you'll need:</strong></p>
+                  <ul className="list-disc list-inside space-y-1 text-left max-w-md mx-auto">
+                    <li>AWS Access Key ID</li>
+                    <li>AWS Secret Access Key</li>
+                    <li>AWS Region</li>
+                    <li>Bucket name (must be globally unique)</li>
+                  </ul>
+                </div>
+                <Button onClick={() => setShowAddBucket(true)} size="lg">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Your First Bucket
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Bucket Name</TableHead>
+                      <TableHead>Region</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Users</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {buckets.map((bucket) => (
+                      <TableRow key={bucket.id} className="cursor-pointer hover:bg-gray-50" onClick={() => window.location.href = `/file-manager?bucket=${bucket.name}`}>
+                        <TableCell className="font-medium">{bucket.name}</TableCell>
+                        <TableCell>{bucket.region}</TableCell>
+                        <TableCell>{bucket.created}</TableCell>
+                        <TableCell>{bucket.userCount}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleAnalyticsClick(bucket.name); }}>
+                              <BarChart3 className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setSelectedBucketForMembers(bucket.name); setShowMemberManagement(true); }}>
+                              <Users className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="outline">
+                              <Settings className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </main>
 
