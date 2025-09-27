@@ -116,9 +116,34 @@ function OwnerDashboardInner() {
 
   // Auto-refresh buckets every 30 seconds to catch member count updates
   React.useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       if (user?.primaryEmailAddress?.emailAddress) {
-        loadBuckets();
+        try {
+          const ownerEmail = user.primaryEmailAddress.emailAddress;
+          const timestamp = new Date().getTime();
+          const response = await fetch(`${API_BASE_URL}/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}&_t=${timestamp}`, {
+            headers: {
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data)) {
+              setBuckets(data.map((bucket: any) => ({
+                id: bucket.id.toString(),
+                name: bucket.name,
+                region: bucket.region,
+                created: bucket.created,
+                userCount: bucket.userCount || 0
+              })));
+              setLastRefresh(new Date());
+            }
+          }
+        } catch (error) {
+          console.error('Auto-refresh failed:', error);
+        }
       }
     }, 30000); // Refresh every 30 seconds
 
@@ -126,7 +151,7 @@ function OwnerDashboardInner() {
   }, [user?.primaryEmailAddress?.emailAddress]);
 
 
-  const loadBuckets = React.useCallback(async (showLoading = false) => {
+  const loadBuckets = async (showLoading = false) => {
     try {
       if (showLoading) setIsRefreshing(true);
       
@@ -172,7 +197,7 @@ function OwnerDashboardInner() {
     } finally {
       if (showLoading) setIsRefreshing(false);
     }
-  }, [user?.primaryEmailAddress?.emailAddress]);
+  };
   
   React.useEffect(() => {
     if (user?.primaryEmailAddress?.emailAddress) {
