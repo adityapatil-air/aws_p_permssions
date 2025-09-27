@@ -102,26 +102,13 @@ function OwnerDashboardInner() {
     );
   }
 
-  // Add a fallback timer to ensure dashboard loads even if authentication is slow
-  React.useEffect(() => {
-    const fallbackTimer = setTimeout(() => {
-      if (isInitialLoading) {
-        console.warn('Fallback: Forcing dashboard to load after timeout');
-        setIsInitialLoading(false);
-      }
-    }, 5000); // 5 second fallback
-    
-    return () => clearTimeout(fallbackTimer);
-  }, [isInitialLoading]);
-
-  // Show loading state during initial load (with shorter timeout)
+  // Show loading state during initial load
   if (isInitialLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading dashboard...</p>
-          <p className="text-sm text-gray-400 mt-2">This should only take a moment</p>
         </div>
       </div>
     );
@@ -181,89 +168,29 @@ function OwnerDashboardInner() {
       setLastRefresh(new Date());
     } catch (error) {
       console.error('Failed to load buckets:', error);
-      // Don't set component error for bucket loading failures
-      // Just log the error and continue with empty buckets
       setBuckets([]);
-      
-      // Show a toast notification instead of blocking the entire dashboard
-      toast({
-        title: "Failed to load buckets",
-        description: "There was an issue loading your buckets. You can still add new ones.",
-        variant: "destructive"
-      });
     } finally {
       if (showLoading) setIsRefreshing(false);
     }
-  }, [user?.primaryEmailAddress?.emailAddress, toast]);
+  }, [user?.primaryEmailAddress?.emailAddress]);
   
   React.useEffect(() => {
-    const authenticateOwner = async () => {
-      try {
-        if (user?.primaryEmailAddress?.emailAddress) {
-          // Save owner data to localStorage immediately
-          localStorage.setItem('currentOwner', JSON.stringify({
-            email: user.primaryEmailAddress.emailAddress,
-            role: 'owner'
-          }));
-          
-          // Try to authenticate with backend and get buckets
-          try {
-            const response = await fetch(`${API_BASE_URL}/api/owner/google-login`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                email: user.primaryEmailAddress.emailAddress,
-                name: user.fullName || user.firstName || 'Owner'
-              })
-            });
-            
-            if (response.ok) {
-              const data = await response.json();
-              // Set buckets from backend response
-              if (data.buckets) {
-                setBuckets(data.buckets.map((bucket: any) => ({
-                  id: bucket.id.toString(),
-                  name: bucket.name,
-                  region: bucket.region,
-                  created: bucket.created,
-                  userCount: bucket.userCount || 0
-                })));
-              }
-            } else {
-              console.warn('Backend authentication failed, loading buckets directly');
-              await loadBuckets(); // Fallback to direct bucket loading
-            }
-          } catch (apiError) {
-            console.warn('API call failed, loading buckets directly:', apiError);
-            await loadBuckets(); // Fallback to direct bucket loading
-          }
-        } else {
-          console.warn('No user email available');
-        }
-      } catch (error) {
-        console.error('Owner authentication error:', error);
-        // Even if there's an error, we should still show the dashboard
-        // The user might not have any buckets yet
-      } finally {
-        // Always set loading to false to show the dashboard
+    if (user?.primaryEmailAddress?.emailAddress) {
+      // Save owner data to localStorage immediately
+      localStorage.setItem('currentOwner', JSON.stringify({
+        email: user.primaryEmailAddress.emailAddress,
+        role: 'owner'
+      }));
+      
+      // Load buckets and then stop loading
+      loadBuckets().finally(() => {
         setIsInitialLoading(false);
-      }
-    };
-    
-    // Add a timeout to ensure loading state is cleared even if something goes wrong
-    const timeoutId = setTimeout(() => {
-      console.warn('Authentication timeout, showing dashboard anyway');
+      });
+    } else {
+      // If no user, still show dashboard (might be loading)
       setIsInitialLoading(false);
-    }, 10000); // 10 second timeout
-    
-    authenticateOwner().finally(() => {
-      clearTimeout(timeoutId);
-    });
-    
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [user]);
+    }
+  }, [user?.primaryEmailAddress?.emailAddress]);
 
   const handleAddBucket = async () => {
     setError("");
