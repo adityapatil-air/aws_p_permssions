@@ -137,20 +137,32 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       inviteMembers: false
     };
 
-    if (simplified.view === 'all' && !simplified.download) old.viewOnly = true;
-    if (simplified.view === 'all' && simplified.download) old.viewDownload = true;
-    if (simplified.view === 'own' && simplified.download) old.viewDownload = true;
-    if (simplified.view === 'own' && !simplified.download) old.viewOnly = true;
+    // Handle view permissions
+    if (simplified.view === 'all') {
+      if (simplified.download) {
+        old.viewDownload = true;
+      } else {
+        old.viewOnly = true;
+      }
+    }
     
+    // Handle upload permissions - these override view permissions
     if (simplified.upload === 'own') {
       old.uploadViewOwn = true;
       old.deleteOwnFiles = true;
+      // Reset view-only flags since upload includes view
+      old.viewOnly = false;
+      old.viewDownload = false;
     }
     if (simplified.upload === 'all') {
       old.uploadViewAll = true;
       old.deleteFiles = true;
+      // Reset view-only flags since upload includes view
+      old.viewOnly = false;
+      old.viewDownload = false;
     }
     
+    // Handle extra permissions
     if (simplified.share) old.generateLinks = true;
     if (simplified.create_folder) old.createFolder = true;
     if (simplified.invite_members) old.inviteMembers = true;
@@ -172,16 +184,28 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
         invite_members: false
       };
       
-      if (perms.viewOnly || perms.viewDownload) simplified.view = 'all';
+      // Handle view permissions first
+      if (perms.viewOnly) {
+        simplified.view = 'all';
+        simplified.download = false;
+      }
+      if (perms.viewDownload) {
+        simplified.view = 'all';
+        simplified.download = true;
+      }
+      
+      // Handle upload permissions (these override view)
       if (perms.uploadViewOwn) {
         simplified.view = 'own';
         simplified.upload = 'own';
+        simplified.download = true; // Upload permissions include download
       }
       if (perms.uploadViewAll) {
         simplified.view = 'all';
         simplified.upload = 'all';
+        simplified.download = true; // Upload permissions include download
       }
-      if (perms.viewDownload) simplified.download = true;
+      // Handle extra permissions
       if (perms.generateLinks) simplified.share = true;
       if (perms.createFolder) simplified.create_folder = true;
       if (perms.inviteMembers) simplified.invite_members = true;
