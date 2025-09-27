@@ -161,8 +161,8 @@ function OwnerDashboardInner() {
   
   React.useEffect(() => {
     const authenticateOwner = async () => {
-      if (user?.primaryEmailAddress?.emailAddress) {
-        try {
+      try {
+        if (user?.primaryEmailAddress?.emailAddress) {
           // Call backend to authenticate owner and get buckets
           const response = await fetch(`${API_BASE_URL}/api/owner/google-login`, {
             method: 'POST',
@@ -193,21 +193,23 @@ function OwnerDashboardInner() {
             }
           } else {
             console.error('Failed to authenticate owner');
-            loadBuckets(); // Fallback to direct bucket loading
+            await loadBuckets(); // Fallback to direct bucket loading
           }
-        } catch (error) {
-          console.error('Owner authentication error:', error);
-          loadBuckets(); // Fallback to direct bucket loading
-        } finally {
-          setIsInitialLoading(false);
         }
-      } else {
+      } catch (error) {
+        console.error('Owner authentication error:', error);
+        try {
+          await loadBuckets(); // Fallback to direct bucket loading
+        } catch (loadError) {
+          console.error('Failed to load buckets:', loadError);
+        }
+      } finally {
         setIsInitialLoading(false);
       }
     };
     
     authenticateOwner();
-  }, [user, loadBuckets]);
+  }, [user]);
 
   const handleAddBucket = async () => {
     setError("");
