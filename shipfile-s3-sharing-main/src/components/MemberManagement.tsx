@@ -21,13 +21,15 @@ interface MemberManagementProps {
   onOpenChange: (open: boolean) => void;
   bucketName: string;
   ownerEmail: string;
+  onMemberChange?: () => void;
 }
 
 const MemberManagement: React.FC<MemberManagementProps> = ({
   open,
   onOpenChange,
   bucketName,
-  ownerEmail
+  ownerEmail,
+  onMemberChange
 }) => {
   const { toast } = useToast();
   const [members, setMembers] = useState<Member[]>([]);
@@ -309,6 +311,11 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       // Immediately reload members to show updated permissions
       await loadMembers();
       
+      // Notify parent component about member changes
+      if (onMemberChange) {
+        onMemberChange();
+      }
+      
       // Trigger a permission refresh for the updated member
       try {
         await fetch(`${API_BASE_URL}/api/member/${encodeURIComponent(editingMember.email)}/permissions/refresh?bucketName=${bucketName}`, {
@@ -365,6 +372,11 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       }
       
       loadMembers();
+      
+      // Notify parent component about member changes
+      if (onMemberChange) {
+        onMemberChange();
+      }
       
       toast({
         title: "Member Removed",

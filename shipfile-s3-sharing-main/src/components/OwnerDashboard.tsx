@@ -15,6 +15,7 @@ import React from "react";
 import { useDarkMode } from '../hooks/use-dark-mode';
 
 import MemberManagement from "./MemberManagement";
+import { useToast } from '../hooks/use-toast';
 
 interface Bucket {
   id: string;
@@ -58,6 +59,7 @@ const AWS_REGIONS = [
 export default function OwnerDashboard() {
   const { signOut, user } = useClerk();
   const { isDarkMode, toggleDarkMode } = useDarkMode();
+  const { toast } = useToast();
 
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [showAddBucket, setShowAddBucket] = useState(false);
@@ -75,14 +77,36 @@ export default function OwnerDashboard() {
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [showMemberManagement, setShowMemberManagement] = useState(false);
   const [selectedBucketForMembers, setSelectedBucketForMembers] = useState<string>("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+
+  // Auto-refresh buckets every 30 seconds to catch member count updates
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      if (user?.primaryEmailAddress?.emailAddress) {
+        loadBuckets();
+      }
+    }, 30000); // Refresh every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [loadBuckets, user?.primaryEmailAddress?.emailAddress]);
 
 
-  const loadBuckets = React.useCallback(async () => {
+  const loadBuckets = React.useCallback(async (showLoading = false) => {
     try {
+      if (showLoading) setIsRefreshing(true);
+      
       const ownerEmail = user?.primaryEmailAddress?.emailAddress;
       if (!ownerEmail) return;
       
-      const response = await fetch(`${API_BASE_URL}/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}`);
+      // Add cache-busting parameter to ensure fresh data
+      const timestamp = new Date().getTime();
+      const response = await fetch(`${API_BASE_URL}/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}&_t=${timestamp}`, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       const data = await response.json();
       setBuckets(data.map((bucket: any) => ({
         id: bucket.id.toString(),
@@ -91,8 +115,12 @@ export default function OwnerDashboard() {
         created: bucket.created,
         userCount: bucket.userCount || 0
       })));
+      
+      setLastRefresh(new Date());
     } catch (error) {
       console.error('Failed to load buckets:', error);
+    } finally {
+      if (showLoading) setIsRefreshing(false);
     }
   }, [user?.primaryEmailAddress?.emailAddress]);
   
@@ -260,10 +288,24 @@ export default function OwnerDashboard() {
         <div className="max-w-6xl mx-auto space-y-6">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-semibold dark:text-white">Your S3 Buckets</h2>
-            <Button onClick={() => setShowAddBucket(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Bucket
-            </Button>
+            <div className="flex items-center gap-2">
+              {lastRefresh && (
+                <span className="text-sm text-gray-500">
+                  Last updated: {lastRefresh.toLocaleTimeString()}
+                </span>
+              )}
+              <Button 
+                variant="outline" 
+                onClick={() => loadBuckets(true)}
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </Button>
+              <Button onClick={() => setShowAddBucket(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Bucket
+              </Button>
+            </div>
           </div>
 
           {buckets.length === 0 ? (
@@ -310,7 +352,12 @@ export default function OwnerDashboard() {
                         <TableCell className="font-medium">{bucket.name}</TableCell>
                         <TableCell>{bucket.region}</TableCell>
                         <TableCell>{bucket.created}</TableCell>
-                        <TableCell>{bucket.userCount}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <span>{bucket.userCount}</span>
+                            <div className="w-2 h-2 bg-green-500 rounded-full" title="Live count - auto-refreshes"></div>
+                          </div>
+                        </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
                             <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleAnalyticsClick(bucket.name); }}>
@@ -639,9 +686,26 @@ export default function OwnerDashboard() {
 
       <MemberManagement
         open={showMemberManagement}
-        onOpenChange={setShowMemberManagement}
+        onOpenChange={(open) => {
+          setShowMemberManagement(open);
+          // Refresh buckets when member management closes to update user counts
+          if (!open) {
+            setTimeout(() => loadBuckets(true), 500);
+          }
+        }}
         bucketName={selectedBucketForMembers}
         ownerEmail={user?.primaryEmailAddress?.emailAddress || ""}
+        onMemberChange={() => {
+          // Refresh buckets when members are added/removed
+          loadBuckets(true);
+          
+          // Show notification about member count update
+          toast({
+            title: "Member Count Updated",
+            description: "The member count has been refreshed to reflect recent changes.",
+            className: "bg-blue-100 border-blue-400 text-blue-800"
+          });
+        }}
       />
       
       {/* Footer */}
