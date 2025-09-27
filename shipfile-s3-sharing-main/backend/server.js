@@ -2402,6 +2402,7 @@ app.get('/api/buckets/:bucketName/all-members', async (req, res) => {
   console.log('=== ALL MEMBERS REQUEST ===');
   console.log('Bucket Name:', bucketName);
   console.log('Owner Email:', ownerEmail);
+  console.log('Request timestamp:', new Date().toISOString());
 
   try {
     // Verify the requester is the bucket owner
@@ -2419,13 +2420,29 @@ app.get('/api/buckets/:bucketName/all-members', async (req, res) => {
         return res.status(403).json({ error: 'Only bucket owner can view all members' });
       }
       
-      // Get all members for this bucket
-      db.all('SELECT email, permissions, scope_type, scope_folders, invited_by FROM members WHERE bucket_name = ?', [bucketName], (err, members) => {
+      // Get all members for this bucket with fresh data
+      db.all('SELECT email, permissions, scope_type, scope_folders, invited_by FROM members WHERE bucket_name = ? ORDER BY email', [bucketName], (err, members) => {
         if (err) {
           console.error('Database error:', err);
           return res.status(500).json({ error: 'Database error' });
         }
-        console.log('Members found:', members);
+        
+        console.log(`Members found: ${members.length}`);
+        members.forEach((member, index) => {
+          console.log(`Member ${index + 1}:`, {
+            email: member.email,
+            permissions: member.permissions,
+            scope_type: member.scope_type,
+            scope_folders: member.scope_folders,
+            invited_by: member.invited_by
+          });
+        });
+        
+        // Set cache control headers to prevent caching
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        
         res.json(members || []);
       });
     });
@@ -2675,6 +2692,22 @@ app.put('/api/members/:email/permissions', async (req, res) => {
   console.log('New scope:', scopeType, scopeFolders);
   
   try {
+    // First verify the member exists
+    const existingMember = await new Promise((resolve, reject) => {
+      db.get('SELECT email, permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
+        [email, bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    if (!existingMember) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+    
+    console.log('Existing member data:', existingMember);
+    
+    // Update the member permissions
     db.run(
       'UPDATE members SET permissions = ?, scope_type = ?, scope_folders = ? WHERE email = ? AND bucket_name = ?',
       [JSON.stringify(permissions), scopeType, JSON.stringify(scopeFolders), email, bucketName],
@@ -2684,16 +2717,32 @@ app.put('/api/members/:email/permissions', async (req, res) => {
           return res.status(500).json({ error: 'Failed to update member permissions' });
         }
         
+        console.log('Database update result - changes:', this.changes);
+        
         if (this.changes === 0) {
-          return res.status(404).json({ error: 'Member not found' });
+          return res.status(404).json({ error: 'Member not found or no changes made' });
         }
         
-        console.log('Member permissions updated successfully');
+        console.log('✅ Member permissions updated successfully');
         
-        // Log permission change activity
-        logActivity(bucketName, 'owner', 'permission_change', email, null, 'Permissions updated');
-        
-        res.json({ success: true, message: 'Permissions updated successfully' });
+        // Verify the update by fetching the updated record
+        db.get('SELECT email, permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', 
+          [email, bucketName], (err, updatedMember) => {
+          if (err) {
+            console.error('Error verifying update:', err);
+          } else {
+            console.log('Updated member data:', updatedMember);
+          }
+          
+          // Log permission change activity
+          logActivity(bucketName, 'owner', 'permission_change', email, null, 'Permissions updated');
+          
+          res.json({ 
+            success: true, 
+            message: 'Permissions updated successfully',
+            updatedMember: updatedMember
+          });
+        });
       }
     );
   } catch (error) {
@@ -3399,6 +3448,84 @@ app.get('/api/buckets/:bucketName/analytics', async (req, res) => {
   } catch (error) {
     console.error('Analytics error:', error);
     res.status(500).json({ error: 'Failed to load analytics' });
+  }
+});
+
+// Test permission update endpoint
+app.post('/api/test-permission-update', async (req, res) => {
+  const { email, bucketName } = req.body;
+  
+  console.log('=== TESTING PERMISSION UPDATE ===');
+  console.log('Email:', email);
+  console.log('Bucket:', bucketName);
+  
+  try {
+    // Get current member data
+    const currentMember = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM members WHERE email = ? AND bucket_name = ?', [email, bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    if (!currentMember) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+    
+    console.log('Current member data:', currentMember);
+    
+    // Create test permissions
+    const testPermissions = {
+      viewOnly: false,
+      viewDownload: true,
+      uploadOnly: false,
+      uploadViewOwn: false,
+      uploadViewAll: false,
+      deleteFiles: false,
+      generateLinks: true,
+      createFolder: false,
+      deleteOwnFiles: false,
+      inviteMembers: false
+    };
+    
+    // Update permissions
+    const updateResult = await new Promise((resolve, reject) => {
+      db.run(
+        'UPDATE members SET permissions = ?, scope_type = ?, scope_folders = ? WHERE email = ? AND bucket_name = ?',
+        [JSON.stringify(testPermissions), 'entire', JSON.stringify([]), email, bucketName],
+        function(err) {
+          if (err) reject(err);
+          else resolve({ changes: this.changes });
+        }
+      );
+    });
+    
+    console.log('Update result:', updateResult);
+    
+    // Verify update
+    const updatedMember = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM members WHERE email = ? AND bucket_name = ?', [email, bucketName], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+    
+    console.log('Updated member data:', updatedMember);
+    
+    res.json({
+      success: true,
+      message: 'Permission update test completed',
+      before: currentMember,
+      after: updatedMember,
+      changes: updateResult.changes
+    });
+    
+  } catch (error) {
+    console.error('Permission update test failed:', error);
+    res.status(500).json({ 
+      error: 'Test failed: ' + error.message,
+      details: error.stack
+    });
   }
 });
 

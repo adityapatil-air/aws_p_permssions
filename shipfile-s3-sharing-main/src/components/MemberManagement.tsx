@@ -59,16 +59,30 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     setError('');
     try {
       console.log('Loading members for bucket:', bucketName, 'owner:', ownerEmail);
-      const response = await fetch(`${API_BASE_URL}/api/buckets/${bucketName}/all-members?ownerEmail=${encodeURIComponent(ownerEmail)}`);
+      
+      // Add cache-busting parameter to ensure fresh data
+      const timestamp = new Date().getTime();
+      const response = await fetch(`${API_BASE_URL}/api/buckets/${bucketName}/all-members?ownerEmail=${encodeURIComponent(ownerEmail)}&_t=${timestamp}`, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
       const data = await response.json();
       
       if (!response.ok) {
         throw new Error(data.error || 'Failed to load members');
       }
       
-      console.log('Loaded members:', data);
-      setMembers(data);
+      console.log('Loaded members (fresh data):', data);
+      
+      // Force state update by creating new array
+      setMembers([...data]);
+      
     } catch (error) {
+      console.error('Error loading members:', error);
       setError(error instanceof Error ? error.message : 'Failed to load members');
     } finally {
       setLoading(false);
@@ -80,6 +94,16 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       loadMembers();
     }
   }, [open, bucketName, ownerEmail]);
+  
+  // Force refresh when dialog opens to ensure fresh data
+  useEffect(() => {
+    if (open) {
+      // Clear existing members to force a fresh load
+      setMembers([]);
+      setError('');
+      loadMembers();
+    }
+  }, [open]);
 
   const formatPermissions = (permissionsStr: string) => {
     try {
@@ -268,23 +292,31 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
       const result = await response.json();
       console.log('API success response:', result);
       
+      // Close the edit dialog
       setShowEditPermissions(false);
       setEditingMember(null);
       
-      // Force a complete refresh to ensure changes are reflected
-      setTimeout(() => {
-        loadMembers();
-      }, 500);
+      // Clear any existing errors
+      setError('');
+      
+      // Immediately reload members to show updated permissions
+      await loadMembers();
       
       toast({
         title: "Permissions Updated",
-        description: `Permissions updated for ${editingMember?.email}. Changes may take a moment to reflect.`,
+        description: `Permissions successfully updated for ${editingMember?.email}`,
         className: "bg-green-100 border-green-400 text-green-800"
       });
       
     } catch (error) {
       console.error('Failed to update member permissions:', error);
       setError(error instanceof Error ? error.message : 'Failed to update permissions');
+      
+      toast({
+        title: "Update Failed",
+        description: error instanceof Error ? error.message : 'Failed to update permissions',
+        className: "bg-red-100 border-red-400 text-red-800"
+      });
     }
   };
 
@@ -330,7 +362,18 @@ const MemberManagement: React.FC<MemberManagementProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Bucket Members</DialogTitle>
+          <DialogTitle className="flex items-center justify-between">
+            <span>Bucket Members</span>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={loadMembers}
+              disabled={loading}
+              className="ml-4"
+            >
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </Button>
+          </DialogTitle>
         </DialogHeader>
         
         {error && (
