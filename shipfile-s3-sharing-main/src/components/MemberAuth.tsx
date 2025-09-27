@@ -3,9 +3,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useDarkMode } from '../hooks/use-dark-mode';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
+
 import { ArrowLeft, User, Mail, AlertCircle, Moon, Sun } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -17,55 +15,11 @@ const MemberAuth = () => {
 
   const { isSignedIn, user } = useUser();
   const { signOut } = useClerk();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
   const [member, setMember] = useState(null);
-  const [showEmailLogin, setShowEmailLogin] = useState(false);
 
 
-  const handleEmailLogin = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/member/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Login failed');
-      }
-
-      // Handle multiple buckets
-      if (data.buckets && data.buckets.length > 0) {
-        const memberData = {
-          email: data.email,
-          buckets: data.buckets
-        };
-        setMember(memberData);
-        localStorage.setItem('currentMember', JSON.stringify(memberData));
-        // If only one bucket, go directly to it
-        if (data.buckets.length === 1) {
-          navigate(`/file-manager?bucket=${data.buckets[0].bucketName}`);
-        }
-        // If multiple buckets, stay on this page to show bucket selection
-      } else {
-        throw new Error('No buckets found for this member');
-      }
-
-    } catch (error) {
-      setError(error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Check for existing member data on component mount
   React.useEffect(() => {
@@ -80,51 +34,7 @@ const MemberAuth = () => {
     }
   }, [isSignedIn]);
 
-  const handleGoogleLogin = async () => {
-    if (isSignedIn && user?.primaryEmailAddress?.emailAddress) {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/google-login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            email: user.primaryEmailAddress.emailAddress,
-            name: user.fullName || user.firstName || 'Member'
-          })
-        });
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          setError(data.error || 'You are not a member of any organization');
-          setTimeout(() => {
-            signOut();
-            setError('');
-          }, 3000);
-          return;
-        }
-
-        // Handle multiple buckets
-        if (data.buckets && data.buckets.length > 0) {
-          const memberData = {
-            email: data.email,
-            buckets: data.buckets,
-            isOwner: data.isOwner || false
-          };
-          setMember(memberData);
-          localStorage.setItem('currentMember', JSON.stringify(memberData));
-        } else {
-          throw new Error('No buckets found for this member');
-        }
-
-      } catch (error) {
-        setError('You are not a member of any organization');
-        setTimeout(() => {
-          signOut();
-          setError('');
-        }, 3000);
-      }
-    }
-  };
 
   React.useEffect(() => {
     const authenticateMember = async () => {
@@ -265,7 +175,7 @@ const MemberAuth = () => {
             </div>
             <CardTitle className="text-2xl">Member Authentication</CardTitle>
             <CardDescription>
-              Sign in with your email or Google account
+              Sign in with your Google account
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -282,92 +192,28 @@ const MemberAuth = () => {
               </Alert>
             )}
             
-            {!showEmailLogin ? (
-              <div className="space-y-4">
-                <div className="w-full">
-                  <SignIn 
-                    appearance={{
-                      elements: {
-                        formButtonPrimary: 'bg-accent hover:opacity-90',
-                        card: 'shadow-none border-0',
-                        rootBox: 'w-full',
-                        formFieldInput: 'hidden',
-                        formField: 'hidden',
-                        socialButtonsBlockButton: 'w-full',
-                        socialButtonsBlockButtonText: 'text-sm font-medium',
-                      },
-                    }}
-                    fallbackRedirectUrl="/member-auth"
-                    forceRedirectUrl="/member-auth"
-                  />
-                </div>
-                
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <Separator className="w-full" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-white px-2 text-muted-foreground">Or</span>
-                  </div>
-                </div>
-                
-                <Button 
-                  onClick={() => setShowEmailLogin(true)}
-                  variant="outline" 
-                  className="w-full"
-                >
-                  Sign in with Email & Password
-                </Button>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 text-center">
+                Sign in with your Google account to access your organization
+              </p>
+              <div className="w-full">
+                <SignIn 
+                  appearance={{
+                    elements: {
+                      formButtonPrimary: 'bg-accent hover:opacity-90',
+                      card: 'shadow-none border-0',
+                      rootBox: 'w-full',
+                      formFieldInput: 'hidden',
+                      formField: 'hidden',
+                      socialButtonsBlockButton: 'w-full',
+                      socialButtonsBlockButtonText: 'text-sm font-medium',
+                    },
+                  }}
+                  fallbackRedirectUrl="/member-auth"
+                  forceRedirectUrl="/member-auth"
+                />
               </div>
-            ) : (
-              <div className="space-y-4">
-                <form onSubmit={handleEmailLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Email</Label>
-                    <Input
-                      type="email"
-                      placeholder="Enter your email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label>Password</Label>
-                    <Input
-                      type="password"
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                  
-                  {error && (
-                    <Alert variant="destructive">
-                      <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                  )}
-                  
-                  <Button 
-                    type="submit" 
-                    disabled={loading || !email || !password}
-                    className="w-full"
-                  >
-                    {loading ? 'Signing In...' : 'Sign In'}
-                  </Button>
-                </form>
-                
-                <Button 
-                  onClick={() => setShowEmailLogin(false)}
-                  variant="ghost" 
-                  className="w-full"
-                >
-                  Back to Google Login
-                </Button>
-              </div>
-            )}
+            </div>
           </CardContent>
         </Card>
       </main>

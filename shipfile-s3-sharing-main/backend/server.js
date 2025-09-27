@@ -102,14 +102,15 @@ if (!process.env.DATABASE_URL) {
     
     db.run(`CREATE TABLE IF NOT EXISTS members (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE,
+      email TEXT,
       password TEXT,
       bucket_name TEXT,
       permissions TEXT,
       scope_type TEXT,
       scope_folders TEXT,
       invited_by TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(email, bucket_name)
     )`);
     
     db.run(`CREATE TABLE IF NOT EXISTS file_ownership (
@@ -1677,7 +1678,7 @@ app.get('/api/invite/:token', async (req, res) => {
 // Accept invitation
 app.post('/api/invite/:token/accept', async (req, res) => {
   const { token } = req.params;
-  const { password } = req.body;
+  const { email, name } = req.body;
   
   try {
     db.get('SELECT * FROM invitations WHERE id = ? AND accepted = 0', [token], (err, invite) => {
@@ -1687,6 +1688,11 @@ app.post('/api/invite/:token/accept', async (req, res) => {
       
       if (new Date(invite.expires_at) < new Date()) {
         return res.status(410).json({ error: 'Invitation has expired' });
+      }
+      
+      // Verify the email matches the invitation
+      if (email !== invite.email) {
+        return res.status(400).json({ error: 'Email does not match the invitation' });
       }
       
       // Get who sent the invitation
@@ -1700,10 +1706,10 @@ app.post('/api/invite/:token/accept', async (req, res) => {
           }
           
           if (existingMember) {
-            // Update existing member's permissions
+            // Update existing member's permissions (no password needed for Google OAuth)
             db.run(
-              'UPDATE members SET password = ?, permissions = ?, scope_type = ?, scope_folders = ?, invited_by = ? WHERE email = ? AND bucket_name = ?',
-              [password, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy, invite.email, invite.bucket_name],
+              'UPDATE members SET permissions = ?, scope_type = ?, scope_folders = ?, invited_by = ? WHERE email = ? AND bucket_name = ?',
+              [invite.permissions, invite.scope_type, invite.scope_folders, invitedBy, invite.email, invite.bucket_name],
               function(err) {
                 if (err) {
                   return res.status(500).json({ error: 'Failed to update member account' });
@@ -1725,10 +1731,10 @@ app.post('/api/invite/:token/accept', async (req, res) => {
               }
             );
           } else {
-            // Insert new member for this bucket
+            // Insert new member for this bucket (no password needed for Google OAuth)
             db.run(
-              'INSERT INTO members (email, password, bucket_name, permissions, scope_type, scope_folders, invited_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-              [invite.email, password, invite.bucket_name, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy],
+              'INSERT INTO members (email, bucket_name, permissions, scope_type, scope_folders, invited_by) VALUES (?, ?, ?, ?, ?, ?)',
+              [invite.email, invite.bucket_name, invite.permissions, invite.scope_type, invite.scope_folders, invitedBy],
               function(err) {
                 if (err) {
                   return res.status(500).json({ error: 'Failed to create member account' });
@@ -1758,7 +1764,7 @@ app.post('/api/invite/:token/accept', async (req, res) => {
   }
 });
 
-// Member login (email + password)
+// Member login (email + password) - Keep for backward compatibility
 app.post('/api/member/login', async (req, res) => {
   const { email, password } = req.body;
   
@@ -2600,7 +2606,7 @@ app.post('/api/google-login', async (req, res) => {
           });
         });
       } else {
-        // Check if user is a member
+        // Check if user is a member (no password check needed for Google OAuth)
         db.all('SELECT * FROM members WHERE email = ?', [email], (err, members) => {
           if (err) {
             return res.status(500).json({ error: 'Database error' });

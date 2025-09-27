@@ -2,11 +2,10 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle, XCircle } from "lucide-react";
 import { API_BASE_URL } from '@/config/api';
+import { SignIn, useUser } from '@clerk/clerk-react';
 
 interface InviteData {
   email: string;
@@ -19,12 +18,11 @@ export default function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const [inviteData, setInviteData] = useState<InviteData | null>(null);
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const { isSignedIn, user } = useUser();
 
   const formatPermissions = (permissionsStr: string) => {
     try {
@@ -72,18 +70,13 @@ export default function AcceptInvite() {
   };
 
   const handleAcceptInvite = async () => {
-    if (!password.trim()) {
-      setError("Password is required");
+    if (!isSignedIn || !user?.primaryEmailAddress?.emailAddress) {
+      setError("Please sign in with Google first");
       return;
     }
 
-    if (password !== confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
-
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+    if (user.primaryEmailAddress.emailAddress !== inviteData?.email) {
+      setError(`Please sign in with the invited email: ${inviteData?.email}`);
       return;
     }
 
@@ -94,7 +87,10 @@ export default function AcceptInvite() {
       const response = await fetch(`${API_BASE_URL}/api/invite/${token}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ 
+          email: user.primaryEmailAddress.emailAddress,
+          name: user.fullName || user.firstName || 'Member'
+        })
       });
 
       const data = await response.json();
@@ -107,11 +103,13 @@ export default function AcceptInvite() {
       
       // Store member data in localStorage
       const memberData = {
-        email: inviteData.email,
-        bucketName: data.bucketName,
-        permissions: inviteData.permissions,
-        scopeType: data.scopeType || 'entire',
-        scopeFolders: data.scopeFolders || '[]'
+        email: data.email,
+        buckets: [{
+          bucketName: data.bucketName,
+          permissions: inviteData.permissions,
+          scopeType: data.scopeType || 'entire',
+          scopeFolders: data.scopeFolders || '[]'
+        }]
       };
       localStorage.setItem('currentMember', JSON.stringify(memberData));
       
@@ -203,25 +201,35 @@ export default function AcceptInvite() {
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label>Create Password</Label>
-            <Input
-              type="password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Confirm Password</Label>
-            <Input
-              type="password"
-              placeholder="Confirm your password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-            />
-          </div>
+          {!isSignedIn ? (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 text-center">
+                Sign in with Google to accept this invitation
+              </p>
+              <SignIn 
+                appearance={{
+                  elements: {
+                    formButtonPrimary: 'bg-blue-600 hover:bg-blue-700',
+                    card: 'shadow-none border-0',
+                    rootBox: 'w-full',
+                  },
+                }}
+                fallbackRedirectUrl={`/accept-invite/${token}`}
+                forceRedirectUrl={`/accept-invite/${token}`}
+              />
+            </div>
+          ) : (
+            <div className="bg-green-50 p-4 rounded-lg">
+              <p className="text-sm text-green-800">
+                ✅ Signed in as: <strong>{user?.primaryEmailAddress?.emailAddress}</strong>
+              </p>
+              {user?.primaryEmailAddress?.emailAddress !== inviteData?.email && (
+                <p className="text-sm text-red-600 mt-2">
+                  ⚠️ Please sign in with the invited email: <strong>{inviteData?.email}</strong>
+                </p>
+              )}
+            </div>
+          )}
 
           {error && (
             <Alert variant="destructive">
@@ -231,7 +239,7 @@ export default function AcceptInvite() {
 
           <Button
             onClick={handleAcceptInvite}
-            disabled={accepting || !password || !confirmPassword}
+            disabled={accepting || !isSignedIn || user?.primaryEmailAddress?.emailAddress !== inviteData?.email}
             className="w-full"
           >
             {accepting ? "Accepting..." : "Accept Invitation"}
