@@ -1,24 +1,25 @@
-import sqlite3 from "sqlite3";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import sqlite3 from 'sqlite3';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const db = new sqlite3.Database(join(__dirname, "shipfile.db"));
 
-console.log("=== COMPLETE MEMBERS DATA ===");
+const db = new sqlite3.Database(join(__dirname, 'shipfile.db'));
 
-db.all("SELECT * FROM members", (err, rows) => {
+console.log('🔍 Checking current members in database...');
+
+db.all('SELECT email, bucket_name, permissions, scope_type, scope_folders FROM members', (err, rows) => {
   if (err) {
-    console.error("Error:", err);
+    console.error('Error:', err);
   } else {
-    rows.forEach((row, i) => {
-      console.log(`\n${i+1}. Member:`);
-      console.log(`   Email: ${row.email}`);
+    console.log(`Found ${rows.length} members:`);
+    rows.forEach((row, index) => {
+      console.log(`${index + 1}. Email: ${row.email}`);
       console.log(`   Bucket: ${row.bucket_name}`);
-      console.log(`   Permissions: ${row.permissions}`);
-      console.log(`   Scope Type: ${row.scope_type}`);
-      console.log(`   Scope Folders: ${row.scope_folders}`);
+      console.log(`   Scope: ${row.scope_type || 'entire'}`);
+      console.log(`   Folders: ${row.scope_folders || 'all'}`);
+      console.log('');
     });
   }
   db.close();

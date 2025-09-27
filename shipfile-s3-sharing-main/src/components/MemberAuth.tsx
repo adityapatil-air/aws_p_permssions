@@ -38,7 +38,7 @@ const MemberAuth = () => {
 
   React.useEffect(() => {
     const authenticateMember = async () => {
-      if (isSignedIn && user?.primaryEmailAddress?.emailAddress && !error) {
+      if (isSignedIn && user?.primaryEmailAddress?.emailAddress && !member && !error) {
         try {
           const response = await fetch(`${API_BASE_URL}/api/google-login`, {
             method: 'POST',
@@ -52,11 +52,7 @@ const MemberAuth = () => {
           const data = await response.json();
 
           if (!response.ok) {
-            setError(data.error || 'You are not a member of any organization');
-            setTimeout(() => {
-              signOut();
-              setError('');
-            }, 3000);
+            setError(data.error || 'You are not a member of any organization. Please contact your administrator for an invitation.');
             return;
           }
 
@@ -75,21 +71,17 @@ const MemberAuth = () => {
               navigate(`/file-manager?bucket=${data.buckets[0].bucketName}`);
             }
           } else {
-            throw new Error('No buckets found for this member');
+            setError('No buckets found for this member. Please contact your administrator.');
           }
 
         } catch (error) {
-          setError('You are not a member of any organization');
-          setTimeout(() => {
-            signOut();
-            setError('');
-          }, 3000);
+          setError('Authentication failed. Please try again or contact your administrator.');
         }
       }
     };
     
     authenticateMember();
-  }, [isSignedIn, user, error, signOut, navigate]);
+  }, [isSignedIn, user, member, error, navigate]);
 
   if (member) {
     return (
@@ -138,6 +130,7 @@ const MemberAuth = () => {
               <Button 
                 onClick={() => {
                   setMember(null);
+                  setError('');
                   localStorage.removeItem('currentMember');
                   if (isSignedIn) signOut();
                 }}
@@ -188,7 +181,23 @@ const MemberAuth = () => {
             
             {error && (
               <Alert variant="destructive" className="mb-4">
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription>
+                  {error}
+                  {isSignedIn && (
+                    <div className="mt-2">
+                      <Button 
+                        onClick={() => {
+                          setError('');
+                          signOut();
+                        }}
+                        variant="outline" 
+                        size="sm"
+                      >
+                        Try Different Account
+                      </Button>
+                    </div>
+                  )}
+                </AlertDescription>
               </Alert>
             )}
             
