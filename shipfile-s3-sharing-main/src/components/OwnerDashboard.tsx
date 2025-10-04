@@ -82,8 +82,6 @@ function OwnerDashboardInner() {
   const [selectedBucketForMembers, setSelectedBucketForMembers] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-
   // If there's a component error, show error UI
   if (componentError) {
     return (
@@ -102,58 +100,38 @@ function OwnerDashboardInner() {
     );
   }
 
-  // Simple loading check - stop loading after 3 seconds max
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsInitialLoading(false);
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Show loading only briefly
-  if (isInitialLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
   // Auto-refresh buckets every 30 seconds to catch member count updates
   React.useEffect(() => {
+    if (!user?.primaryEmailAddress?.emailAddress) return;
+    
     const interval = setInterval(async () => {
-      if (user?.primaryEmailAddress?.emailAddress) {
-        try {
-          const ownerEmail = user.primaryEmailAddress.emailAddress;
-          const timestamp = new Date().getTime();
-          const response = await fetch(`${API_BASE_URL}/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}&_t=${timestamp}`, {
-            headers: {
-              'Cache-Control': 'no-cache',
-              'Pragma': 'no-cache'
-            }
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (Array.isArray(data)) {
-              setBuckets(data.map((bucket: any) => ({
-                id: bucket.id.toString(),
-                name: bucket.name,
-                region: bucket.region,
-                created: bucket.created,
-                userCount: bucket.userCount || 0
-              })));
-              setLastRefresh(new Date());
-            }
+      try {
+        const ownerEmail = user.primaryEmailAddress.emailAddress;
+        const timestamp = new Date().getTime();
+        const response = await fetch(`${API_BASE_URL}/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}&_t=${timestamp}`, {
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
           }
-        } catch (error) {
-          console.error('Auto-refresh failed:', error);
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data)) {
+            setBuckets(data.map((bucket: any) => ({
+              id: bucket.id.toString(),
+              name: bucket.name,
+              region: bucket.region,
+              created: bucket.created,
+              userCount: bucket.userCount || 0
+            })));
+            setLastRefresh(new Date());
+          }
         }
+      } catch (error) {
+        console.error('Auto-refresh failed:', error);
       }
-    }, 30000); // Refresh every 30 seconds
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [user?.primaryEmailAddress?.emailAddress]);
@@ -215,12 +193,6 @@ function OwnerDashboardInner() {
         role: 'owner'
       }));
       loadBuckets();
-    } else {
-      // If no user email after 2 seconds, still show dashboard
-      const timer = setTimeout(() => {
-        console.log('No user email found, showing dashboard anyway');
-      }, 2000);
-      return () => clearTimeout(timer);
     }
   }, [user?.primaryEmailAddress?.emailAddress]);
 
