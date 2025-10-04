@@ -682,6 +682,48 @@ app.post('/api/folders', checkPermission('createFolder'), async (req, res) => {
         return res.status(404).json({ error: 'Bucket not found' });
       }
 
+      // Check if user is owner or has proper folder creation permissions
+      if (row.owner_email !== userEmail) {
+        const member = await new Promise((resolve, reject) => {
+          db.get('SELECT permissions, scope_type, scope_folders FROM members WHERE email = ? AND bucket_name = ?', [userEmail, bucketName], (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
+          });
+        });
+
+        if (!member) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const permissions = JSON.parse(member.permissions);
+        if (!permissions.createFolder) {
+          return res.status(403).json({ error: 'You do not have permission to create folders' });
+        }
+
+        // For members with create_folder permission:
+        // - If scope_type is 'entire' or undefined: can create folders anywhere (root or nested)
+        // - If scope_type is 'specific': can create folders in root OR within their allowed folders
+        if (member.scope_type === 'specific') {
+          const allowedFolders = JSON.parse(member.scope_folders || '[]');
+          
+          // If currentPath is provided, check if it's within allowed scope
+          if (currentPath) {
+            const isAllowed = allowedFolders.some(allowedFolder => 
+              currentPath === allowedFolder || 
+              currentPath.startsWith(allowedFolder + '/') ||
+              allowedFolder.startsWith(currentPath + '/')
+            );
+            
+            if (!isAllowed) {
+              return res.status(403).json({ 
+                error: `You can only create folders in: ${allowedFolders.join(', ')} or in the root directory` 
+              });
+            }
+          }
+          // If currentPath is empty (root), allow folder creation in root for members with create_folder permission
+        }
+      }
+
       const s3Client = new S3Client({
         region: row.region,
         credentials: {
