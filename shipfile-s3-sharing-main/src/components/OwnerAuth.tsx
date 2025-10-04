@@ -7,16 +7,64 @@ import { ArrowLeft, Crown, Shield, Key } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 const OwnerAuth = () => {
-  const { isSignedIn, user } = useUser();
+  const { isSignedIn, user, isLoaded } = useUser();
   const { signOut } = useClerk();
   const navigate = useNavigate();
+  const [hasRedirected, setHasRedirected] = React.useState(false);
+  const [loadingTimeout, setLoadingTimeout] = React.useState(false);
+
+  // Add timeout for loading state
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!isLoaded) {
+        setLoadingTimeout(true);
+      }
+    }, 10000); // 10 second timeout
+
+    return () => clearTimeout(timer);
+  }, [isLoaded]);
 
   React.useEffect(() => {
-    if (isSignedIn && user?.primaryEmailAddress?.emailAddress) {
-      // Automatically redirect to dashboard when signed in
-      navigate('/owner-dashboard');
+    // Only redirect if Clerk is fully loaded and we haven't redirected yet
+    if (isLoaded && isSignedIn && user?.primaryEmailAddress?.emailAddress && !hasRedirected) {
+      setHasRedirected(true);
+      // Use setTimeout to prevent immediate redirect issues
+      setTimeout(() => {
+        navigate('/owner-dashboard', { replace: true });
+      }, 100);
     }
-  }, [isSignedIn, user, navigate]);
+  }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress, navigate, hasRedirected]);
+
+  // Show loading while Clerk is initializing
+  if (!isLoaded && !loadingTimeout) {
+    return (
+      <div className="min-h-screen bg-gradient-secondary flex items-center justify-center px-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading authentication...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show error if loading timed out
+  if (loadingTimeout && !isLoaded) {
+    return (
+      <div className="min-h-screen bg-gradient-secondary flex items-center justify-center px-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="text-center py-8">
+            <h2 className="text-xl font-bold text-red-600 mb-4">Authentication Error</h2>
+            <p className="text-muted-foreground mb-4">Failed to load authentication system. Please refresh the page.</p>
+            <Button onClick={() => window.location.reload()}>
+              Refresh Page
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (isSignedIn) {
     return (

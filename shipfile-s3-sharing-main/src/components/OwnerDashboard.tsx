@@ -102,22 +102,45 @@ function OwnerDashboardInner() {
     );
   }
 
-  // --- FIX: Prevent infinite loading by setting isInitialLoading to false if user is loaded but has no email ---
+  // Handle Clerk loading state and user authentication
+  const { isLoaded } = useClerk();
+  
   React.useEffect(() => {
-    // If user object is loaded (not undefined) but has no primaryEmailAddress, stop loading
-    if (user !== undefined && !user?.primaryEmailAddress?.emailAddress) {
+    // If Clerk is loaded but user has no email, redirect to auth
+    if (isLoaded && (!user || !user?.primaryEmailAddress?.emailAddress)) {
+      console.warn('No authenticated user found, redirecting to auth');
+      window.location.href = '/owner-auth';
+      return;
+    }
+    
+    // If user is properly loaded, stop initial loading
+    if (isLoaded && user?.primaryEmailAddress?.emailAddress) {
       setIsInitialLoading(false);
     }
-  }, [user]);
-  // --- END FIX ---
+  }, [isLoaded, user]);
 
   // Show loading state during initial load
-  if (isInitialLoading) {
+  if (!isLoaded || isInitialLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If no user email after loading, show error
+  if (isLoaded && !user?.primaryEmailAddress?.emailAddress) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Authentication Error</h1>
+          <p className="text-gray-600 mb-4">Unable to load user information. Please sign in again.</p>
+          <Button onClick={() => window.location.href = '/owner-auth'}>
+            Go to Sign In
+          </Button>
         </div>
       </div>
     );
@@ -209,23 +232,17 @@ function OwnerDashboardInner() {
   };
   
   React.useEffect(() => {
-    if (user?.primaryEmailAddress?.emailAddress) {
+    if (isLoaded && user?.primaryEmailAddress?.emailAddress) {
       // Save owner data to localStorage immediately
       localStorage.setItem('currentOwner', JSON.stringify({
         email: user.primaryEmailAddress.emailAddress,
         role: 'owner'
       }));
       
-      // Load buckets and then stop loading
-      loadBuckets().finally(() => {
-        setIsInitialLoading(false);
-      });
-    } else if (user !== undefined && !user?.primaryEmailAddress?.emailAddress) {
-      // --- FIX: Stop loading if user is loaded but no email ---
-      setIsInitialLoading(false);
+      // Load buckets
+      loadBuckets();
     }
-    // else: still waiting for user object to load
-  }, [user?.primaryEmailAddress?.emailAddress, user]);
+  }, [isLoaded, user?.primaryEmailAddress?.emailAddress]);
 
   const handleAddBucket = async () => {
     setError("");

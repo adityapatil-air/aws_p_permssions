@@ -8,7 +8,7 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requireAuth = true }) => {
-  const { isSignedIn, isLoaded } = useUser();
+  const { isSignedIn, isLoaded, user } = useUser();
 
   // Show loading while Clerk is initializing
   if (!isLoaded) {
@@ -35,8 +35,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requireAuth =
     return <>{children}</>;
   }
 
-  // Redirect to login if authentication is required but user is not signed in
-  if (requireAuth && !isSignedIn) {
+  // Redirect to auth if authentication is required but user is not properly signed in
+  if (requireAuth && (!isSignedIn || !user?.primaryEmailAddress?.emailAddress)) {
     return <Navigate to="/owner-auth" replace />;
   }
 

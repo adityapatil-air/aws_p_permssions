@@ -10,7 +10,12 @@ if (!PUBLISHABLE_KEY) {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+  <ClerkProvider 
+    publishableKey={PUBLISHABLE_KEY}
+    afterSignOutUrl="/login"
+    signInFallbackRedirectUrl="/owner-dashboard"
+    signUpFallbackRedirectUrl="/owner-dashboard"
+  >
     <App />
   </ClerkProvider>
 );
