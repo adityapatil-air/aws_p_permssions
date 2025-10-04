@@ -35,8 +35,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requireAuth =
     return <>{children}</>;
   }
 
-  // Redirect to auth if authentication is required but user is not properly signed in
-  if (requireAuth && (!isSignedIn || !user?.primaryEmailAddress?.emailAddress)) {
+  // Redirect to auth if authentication is required but user is not signed in
+  if (requireAuth && !isSignedIn) {
     return <Navigate to="/owner-auth" replace />;
   }
 

@@ -102,45 +102,21 @@ function OwnerDashboardInner() {
     );
   }
 
-  // Handle Clerk loading state and user authentication
-  const { isLoaded } = useClerk();
-  
+  // Simple loading check - stop loading after 3 seconds max
   React.useEffect(() => {
-    // If Clerk is loaded but user has no email, redirect to auth
-    if (isLoaded && (!user || !user?.primaryEmailAddress?.emailAddress)) {
-      console.warn('No authenticated user found, redirecting to auth');
-      window.location.href = '/owner-auth';
-      return;
-    }
-    
-    // If user is properly loaded, stop initial loading
-    if (isLoaded && user?.primaryEmailAddress?.emailAddress) {
+    const timer = setTimeout(() => {
       setIsInitialLoading(false);
-    }
-  }, [isLoaded, user]);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
-  // Show loading state during initial load
-  if (!isLoaded || isInitialLoading) {
+  // Show loading only briefly
+  if (isInitialLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // If no user email after loading, show error
-  if (isLoaded && !user?.primaryEmailAddress?.emailAddress) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Authentication Error</h1>
-          <p className="text-gray-600 mb-4">Unable to load user information. Please sign in again.</p>
-          <Button onClick={() => window.location.href = '/owner-auth'}>
-            Go to Sign In
-          </Button>
         </div>
       </div>
     );
@@ -190,10 +166,10 @@ function OwnerDashboardInner() {
       const ownerEmail = user?.primaryEmailAddress?.emailAddress;
       if (!ownerEmail) {
         console.warn('No owner email available for loading buckets');
+        setBuckets([]);
         return;
       }
       
-      // Add cache-busting parameter to ensure fresh data
       const timestamp = new Date().getTime();
       const response = await fetch(`${API_BASE_URL}/api/buckets?ownerEmail=${encodeURIComponent(ownerEmail)}&_t=${timestamp}`, {
         headers: {
@@ -203,18 +179,19 @@ function OwnerDashboardInner() {
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        console.error(`Failed to load buckets: HTTP ${response.status}`);
+        setBuckets([]);
+        return;
       }
       
       const data = await response.json();
       
-      // Handle case where data might not be an array
       if (Array.isArray(data)) {
         setBuckets(data.map((bucket: any) => ({
-          id: bucket.id.toString(),
-          name: bucket.name,
-          region: bucket.region,
-          created: bucket.created,
+          id: bucket.id?.toString() || '',
+          name: bucket.name || '',
+          region: bucket.region || '',
+          created: bucket.created || '',
           userCount: bucket.userCount || 0
         })));
       } else {
@@ -232,17 +209,20 @@ function OwnerDashboardInner() {
   };
   
   React.useEffect(() => {
-    if (isLoaded && user?.primaryEmailAddress?.emailAddress) {
-      // Save owner data to localStorage immediately
+    if (user?.primaryEmailAddress?.emailAddress) {
       localStorage.setItem('currentOwner', JSON.stringify({
         email: user.primaryEmailAddress.emailAddress,
         role: 'owner'
       }));
-      
-      // Load buckets
       loadBuckets();
+    } else {
+      // If no user email after 2 seconds, still show dashboard
+      const timer = setTimeout(() => {
+        console.log('No user email found, showing dashboard anyway');
+      }, 2000);
+      return () => clearTimeout(timer);
     }
-  }, [isLoaded, user?.primaryEmailAddress?.emailAddress]);
+  }, [user?.primaryEmailAddress?.emailAddress]);
 
   const handleAddBucket = async () => {
     setError("");
@@ -308,10 +288,16 @@ function OwnerDashboardInner() {
         ? `${API_BASE_URL}/api/analytics/complete?ownerEmail=${encodeURIComponent(ownerEmail || '')}`
         : `${API_BASE_URL}/api/buckets/${bucketName}/analytics?ownerEmail=${encodeURIComponent(ownerEmail || '')}`;
       const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
       setAnalytics(data);
     } catch (error) {
       console.error('Failed to load analytics:', error);
+      setAnalytics(null);
     } finally {
       setLoadingAnalytics(false);
     }

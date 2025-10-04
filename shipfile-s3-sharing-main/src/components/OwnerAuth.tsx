@@ -25,15 +25,11 @@ const OwnerAuth = () => {
   }, [isLoaded]);
 
   React.useEffect(() => {
-    // Only redirect if Clerk is fully loaded and we haven't redirected yet
-    if (isLoaded && isSignedIn && user?.primaryEmailAddress?.emailAddress && !hasRedirected) {
+    if (isSignedIn && !hasRedirected) {
       setHasRedirected(true);
-      // Use setTimeout to prevent immediate redirect issues
-      setTimeout(() => {
-        navigate('/owner-dashboard', { replace: true });
-      }, 100);
+      window.location.href = '/owner-dashboard';
     }
-  }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress, navigate, hasRedirected]);
+  }, [isSignedIn, hasRedirected]);
 
   // Show loading while Clerk is initializing
   if (!isLoaded && !loadingTimeout) {
