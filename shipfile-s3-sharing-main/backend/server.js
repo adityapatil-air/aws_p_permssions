@@ -24,9 +24,10 @@ if (process.env.SENDGRID_API_KEY) {
 if (process.env.SMTP_PORT) {
   process.env.SMTP_PORT = process.env.SMTP_PORT.replace(/[^0-9]/g, '');
 }
-if (process.env.SMTP_PASS) {
-  process.env.SMTP_PASS = process.env.SMTP_PASS.trim().replace(/^[^S]*/, '');
-}
+// Remove SMTP_PASS cleaning as it's corrupting the password
+// if (process.env.SMTP_PASS) {
+//   process.env.SMTP_PASS = process.env.SMTP_PASS.trim().replace(/^[^S]*/, '');
+// }
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

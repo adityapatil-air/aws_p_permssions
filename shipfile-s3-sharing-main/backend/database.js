@@ -2,6 +2,10 @@ import pg from 'pg';
 import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,12 +21,20 @@ if (process.env.DATABASE_URL) {
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
   });
   
-  await db.connect();
-  isPostgreSQL = true;
-  console.log('Connected to PostgreSQL');
-  
-  // Create tables for PostgreSQL
-  await createPostgreSQLTables(db);
+  try {
+    await db.connect();
+    isPostgreSQL = true;
+    console.log('Connected to PostgreSQL');
+    console.log('Database URL:', process.env.DATABASE_URL.replace(/:[^:]*@/, ':****@')); // Hide password
+    
+    // Create tables for PostgreSQL
+    await createPostgreSQLTables(db);
+  } catch (error) {
+    console.error('PostgreSQL connection failed:', error.message);
+    console.log('Falling back to SQLite');
+    db = new sqlite3.Database(join(__dirname, 'shipfile.db'));
+    isPostgreSQL = false;
+  }
 } else {
   // SQLite for development
   db = new sqlite3.Database(join(__dirname, 'shipfile.db'));

@@ -17,6 +17,7 @@ import { useClerk } from "@clerk/clerk-react";
 import React from "react";
 import { API_BASE_URL } from '@/config/api';
 import { useDarkMode } from '../hooks/use-dark-mode';
+import { ExcelConversionDialog } from './ExcelConversionDialog';
 
 interface FileItem {
   id: string;
@@ -127,6 +128,8 @@ export default function FileManager() {
   const [sortBy, setSortBy] = useState('name');
   const [currentPath, setCurrentPath] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [currentUploadFile, setCurrentUploadFile] = useState('');
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareExpiry, setShareExpiry] = useState('1');
   const [shareLink, setShareLink] = useState('');
@@ -198,6 +201,11 @@ export default function FileManager() {
   const [analytics, setAnalytics] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const { isDarkMode, toggleDarkMode } = useDarkMode();
+  
+  // Excel conversion states
+  const [showExcelConversion, setShowExcelConversion] = useState(false);
+  const [pendingExcelFile, setPendingExcelFile] = useState<File | null>(null);
+  const [pendingFileList, setPendingFileList] = useState<FileList | null>(null);
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
@@ -299,9 +307,40 @@ export default function FileManager() {
     const fileList = event.target.files;
     if (!fileList) return;
 
-    setIsUploading(true);
+    // Check for Excel files and show conversion dialog
+    const excelFiles = Array.from(fileList).filter(file => 
+      file.name.toLowerCase().endsWith('.xlsx') || 
+      file.name.toLowerCase().endsWith('.xls')
+    );
+
+    if (excelFiles.length > 0) {
+      // For now, handle only the first Excel file
+      const excelFile = excelFiles[0];
+      setPendingExcelFile(excelFile);
+      setPendingFileList(fileList);
+      setShowExcelConversion(true);
+      return;
+    }
+
+    // Process files normally if no Excel files
+    await processFileUpload(fileList);
     
-    for (const file of Array.from(fileList)) {
+    // Reset file input
+    event.target.value = '';
+  };
+
+  const processFileUpload = async (fileList: FileList | null, convertedFile?: File | Blob) => {
+    setIsUploading(true);
+    setUploadProgress(0);
+    
+    const filesToUpload = convertedFile ? [convertedFile] : (fileList ? Array.from(fileList) : []);
+    
+    console.log('Files to upload:', filesToUpload.map(f => ({ name: f.name || 'unknown', size: f.size })));
+    
+    for (let i = 0; i < filesToUpload.length; i++) {
+      const file = filesToUpload[i];
+      setCurrentUploadFile(file.name || 'Unknown file');
+      setUploadProgress(Math.round((i / filesToUpload.length) * 100));
       try {
         console.log('Upload request - Current Path:', currentPath);
         console.log('Upload request - File Name:', file.name);
@@ -362,6 +401,7 @@ export default function FileManager() {
         });
 
         console.log(`Uploaded ${file.name} successfully`);
+        setUploadProgress(Math.round(((i + 1) / filesToUpload.length) * 100));
       } catch (error) {
         console.error(`Failed to upload ${file.name}:`, error);
         setConfirmConfig({
@@ -375,12 +415,100 @@ export default function FileManager() {
       }
     }
     
-    setIsUploading(false);
-    setShowUpload(false);
-    loadFiles();
+    setUploadProgress(100);
+    setCurrentUploadFile('');
     
-    // Reset file input
-    event.target.value = '';
+    // Auto-close dialog after a brief delay
+    setTimeout(() => {
+      setIsUploading(false);
+      setShowUpload(false);
+      setUploadProgress(0);
+    }, 1000);
+    
+    loadFiles();
+  };
+
+  // Excel conversion handlers
+  const handleConvertToCsv = async () => {
+    if (!pendingExcelFile) return;
+    
+    try {
+      console.log('Converting Excel to CSV:', pendingExcelFile.name);
+      
+      // Import xlsx library dynamically
+      const XLSX = await import('xlsx');
+      console.log('XLSX library loaded successfully');
+      
+      // Read the Excel file as array buffer
+      const arrayBuffer = await pendingExcelFile.arrayBuffer();
+      console.log('File read as array buffer, size:', arrayBuffer.byteLength);
+      
+      // Parse the workbook
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      console.log('Workbook parsed, sheets:', workbook.SheetNames);
+      
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        throw new Error('No worksheets found in Excel file');
+      }
+      
+      // Get the first worksheet
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      if (!worksheet) {
+        throw new Error('Could not read worksheet data');
+      }
+      
+      // Convert to CSV
+      const csvContent = XLSX.utils.sheet_to_csv(worksheet);
+      console.log('CSV conversion completed, length:', csvContent.length);
+      
+      if (!csvContent || csvContent.trim().length === 0) {
+        throw new Error('Excel file appears to be empty or could not be converted');
+      }
+      
+      // Create CSV file
+      const csvFileName = pendingExcelFile.name.replace(/\.(xlsx|xls)$/i, '.csv');
+      const csvFile = Object.assign(new Blob([csvContent], { type: 'text/csv' }), {
+        name: csvFileName,
+        lastModified: Date.now()
+      });
+      
+      console.log('CSV file created:', csvFileName);
+      
+      setShowExcelConversion(false);
+      await processFileUpload(null, csvFile);
+      
+      setPendingExcelFile(null);
+      setPendingFileList(null);
+      
+      toast({
+        title: "Conversion Successful",
+        description: `Excel file converted to CSV: ${csvFileName}`,
+        className: "bg-green-100 border-green-400 text-green-800"
+      });
+    } catch (error) {
+      console.error('Conversion failed:', error);
+      const errorMessage = error.message || 'Unknown error occurred during conversion';
+      setConfirmConfig({
+        title: 'Conversion Error',
+        message: `Failed to convert Excel file: ${errorMessage}`,
+        confirmText: 'OK',
+        onConfirm: () => {},
+        type: 'info'
+      });
+      setShowConfirmDialog(true);
+    }
+  };
+
+  const handleKeepExcel = async () => {
+    if (!pendingFileList) return;
+    
+    setShowExcelConversion(false);
+    await processFileUpload(pendingFileList);
+    
+    setPendingExcelFile(null);
+    setPendingFileList(null);
   };
 
   const handleCreateFolder = async () => {
@@ -2588,6 +2716,21 @@ export default function FileManager() {
               Choose Files
             </Button>
           </div>
+          
+          {isUploading && (
+            <div className="space-y-3">
+              <div className="flex justify-between text-sm">
+                <span>Uploading: {currentUploadFile}</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowUpload(false)}>
               Cancel
@@ -3629,6 +3772,19 @@ export default function FileManager() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Excel Conversion Dialog */}
+      <ExcelConversionDialog
+        isOpen={showExcelConversion}
+        onClose={() => {
+          setShowExcelConversion(false);
+          setPendingExcelFile(null);
+          setPendingFileList(null);
+        }}
+        onConvertToCsv={handleConvertToCsv}
+        onKeepExcel={handleKeepExcel}
+        fileName={pendingExcelFile?.name || ''}
+      />
 
       {/* Footer */}
       <footer className="bg-white dark:bg-gray-800 border-t dark:border-gray-700 mt-auto transition-colors">
