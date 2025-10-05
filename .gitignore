@@ -2,3 +2,4 @@
 .netlify
 "*.env.backup" 
 ".env.backup" 
+"*.env.backup" 
