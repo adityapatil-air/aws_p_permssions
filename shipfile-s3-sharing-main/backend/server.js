@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import database from './database.js';
 import { addPermissionRefreshEndpoint } from './fix_permission_sync_realtime.js';
 import { CSVProcessor } from './csv-processor.js';
+import csvCleanerRouter from './csv-cleaner.js';
 
 dotenv.config();
 
@@ -3818,6 +3819,9 @@ app.post('/api/process-csv', async (req, res) => {
     });
   }
 });
+
+// Add CSV cleaner API
+app.use('/api/csv-cleaner', csvCleanerRouter);
 
 // Add permission refresh endpoints
 addPermissionRefreshEndpoint(app);

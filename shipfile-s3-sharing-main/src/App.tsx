@@ -16,6 +16,7 @@ import FileManager from "./components/FileManager";
 import AcceptInvite from "./components/AcceptInvite";
 import SharedFolder from "./components/SharedFolder";
 import ProtectedRoute from "./components/ProtectedRoute";
+import CSVCleaner from "./components/CSVCleaner";
 
 const queryClient = new QueryClient();
 
@@ -49,6 +50,7 @@ const App = () => (
           <Route path="/accept-invite/:token" element={<AcceptInvite />} />
           <Route path="/shared-folder/:shareId" element={<SharedFolder />} />
           <Route path="/shared/:shareId" element={<SharedFolder />} />
+          <Route path="/csv-cleaner" element={<CSVCleaner />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

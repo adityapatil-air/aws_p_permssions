@@ -1,0 +1,9 @@
+{
+  "python.terminal.activateEnvironment": false,
+  "python.terminal.executeInFileDir": false,
+  "python.defaultInterpreterPath": "",
+  "python.terminal.launchArgs": [],
+  "terminal.integrated.shellIntegration.enabled": false,
+  "python.experiments.enabled": false,
+  "python.terminal.focusAfterLaunch": false
+}

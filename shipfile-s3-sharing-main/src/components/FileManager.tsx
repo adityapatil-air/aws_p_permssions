@@ -3,13 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { 
   Upload, Download, Trash2, Eye, Share, Folder, 
   File, Image, FileText, Archive, Music, Video, Play,
-  Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit, BarChart3, Moon, Sun
+  Search, Filter, Grid, List, Plus, Settings, UserPlus, Building, Edit, BarChart3, Moon, Sun, Database
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
@@ -206,6 +208,23 @@ export default function FileManager() {
   const [showExcelConversion, setShowExcelConversion] = useState(false);
   const [pendingExcelFile, setPendingExcelFile] = useState<File | null>(null);
   const [pendingFileList, setPendingFileList] = useState<FileList | null>(null);
+  
+  // Athena data preparation states
+  const [showAthenaDialog, setShowAthenaDialog] = useState(false);
+  const [selectedCsvFile, setSelectedCsvFile] = useState<FileItem | null>(null);
+  const [useRawData, setUseRawData] = useState(false);
+  const [athenaOptions, setAthenaOptions] = useState({
+    fixTypos: false,
+    standardization: false,
+    nullHandling: 'none',
+    duplicateRemoval: false,
+    dataValidation: false,
+    columnNormalization: false
+  });
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingResults, setProcessingResults] = useState(null);
+  const [showResultsDialog, setShowResultsDialog] = useState(false);
+  const [processedCSV, setProcessedCSV] = useState('');
 
   const currentBucket = new URLSearchParams(window.location.search).get('bucket') || 'My Bucket';
 
@@ -2629,6 +2648,19 @@ export default function FileManager() {
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
+                            {file.type === 'file' && file.fileType?.toLowerCase() === 'csv' && (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => {
+                                  setSelectedCsvFile(file);
+                                  setShowAthenaDialog(true);
+                                }}
+                                title="Athena Data Preparation"
+                              >
+                                <Database className="h-4 w-4" />
+                              </Button>
+                            )}
                             <Button 
                               variant="ghost" 
                               size="sm" 
@@ -3785,6 +3817,484 @@ export default function FileManager() {
         onKeepExcel={handleKeepExcel}
         fileName={pendingExcelFile?.name || ''}
       />
+
+      {/* Athena Data Preparation Dialog */}
+      <Dialog open={showAthenaDialog} onOpenChange={setShowAthenaDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="pb-4">
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Database className="h-5 w-5 text-blue-600" />
+              Athena Analytics - {selectedCsvFile?.name}
+            </DialogTitle>
+            <p className="text-sm text-gray-600 mt-2">
+              Prepare your CSV data for visualization and analysis
+            </p>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            {/* Raw Data Option */}
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-semibold text-green-800">Use Raw Data</Label>
+                  <p className="text-sm text-green-700 mt-1">Skip data preparation and use the file as-is for immediate analysis</p>
+                </div>
+                <Switch
+                  checked={useRawData}
+                  onCheckedChange={(checked) => {
+                    setUseRawData(checked);
+                    if (checked) {
+                      // Reset all other options when raw data is selected
+                      setAthenaOptions({
+                        fixTypos: false,
+                        standardization: false,
+                        nullHandling: 'none',
+                        duplicateRemoval: false,
+                        dataValidation: false,
+                        columnNormalization: false
+                      });
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            
+            {/* Data Preparation Options */}
+            <div className={`space-y-4 transition-opacity ${useRawData ? 'opacity-50 pointer-events-none' : ''}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-px bg-gray-300 flex-1"></div>
+                <span className="text-sm font-medium text-gray-500 px-3">OR PREPARE DATA</span>
+                <div className="h-px bg-gray-300 flex-1"></div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-white p-4 border rounded-lg hover:shadow-sm transition-shadow">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="font-medium text-gray-800">Fix Typos & Standardization</Label>
+                      <p className="text-xs text-gray-600 mt-1">Correct typos and standardize text formats</p>
+                    </div>
+                    <Switch
+                      checked={athenaOptions.fixTypos}
+                      onCheckedChange={(checked) => setAthenaOptions(prev => ({ ...prev, fixTypos: checked }))}
+                      disabled={useRawData}
+                    />
+                  </div>
+                </div>
+                
+                <div className="bg-white p-4 border rounded-lg hover:shadow-sm transition-shadow">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="font-medium text-gray-800">Data Standardization</Label>
+                      <p className="text-xs text-gray-600 mt-1">Normalize dates, units, and categories</p>
+                    </div>
+                    <Switch
+                      checked={athenaOptions.standardization}
+                      onCheckedChange={(checked) => setAthenaOptions(prev => ({ ...prev, standardization: checked }))}
+                      disabled={useRawData}
+                    />
+                  </div>
+                </div>
+                
+                <div className="bg-white p-4 border rounded-lg hover:shadow-sm transition-shadow">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="font-medium text-gray-800">Duplicate Removal</Label>
+                      <p className="text-xs text-gray-600 mt-1">Remove duplicate rows</p>
+                    </div>
+                    <Switch
+                      checked={athenaOptions.duplicateRemoval}
+                      onCheckedChange={(checked) => setAthenaOptions(prev => ({ ...prev, duplicateRemoval: checked }))}
+                      disabled={useRawData}
+                    />
+                  </div>
+                </div>
+                
+                <div className="bg-white p-4 border rounded-lg hover:shadow-sm transition-shadow">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="font-medium text-gray-800">Data Validation</Label>
+                      <p className="text-xs text-gray-600 mt-1">Validate data types and flag issues</p>
+                    </div>
+                    <Switch
+                      checked={athenaOptions.dataValidation}
+                      onCheckedChange={(checked) => setAthenaOptions(prev => ({ ...prev, dataValidation: checked }))}
+                      disabled={useRawData}
+                    />
+                  </div>
+                </div>
+                
+                <div className="bg-white p-4 border rounded-lg hover:shadow-sm transition-shadow">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="font-medium text-gray-800">Column Normalization</Label>
+                      <p className="text-xs text-gray-600 mt-1">Normalize numeric columns</p>
+                    </div>
+                    <Switch
+                      checked={athenaOptions.columnNormalization}
+                      onCheckedChange={(checked) => setAthenaOptions(prev => ({ ...prev, columnNormalization: checked }))}
+                      disabled={useRawData}
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white p-4 border rounded-lg hover:shadow-sm transition-shadow">
+                <Label className="font-medium text-gray-800 mb-3 block">Null Value Handling</Label>
+                <p className="text-xs text-gray-600 mb-3">Choose how to handle missing/null values</p>
+                <Select 
+                  value={athenaOptions.nullHandling} 
+                  onValueChange={(value) => setAthenaOptions(prev => ({ ...prev, nullHandling: value }))}
+                  disabled={useRawData}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select null handling method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Keep as null</SelectItem>
+                    <SelectItem value="mean">Replace with mean (numeric)</SelectItem>
+                    <SelectItem value="median">Replace with median (numeric)</SelectItem>
+                    <SelectItem value="mode">Replace with mode (most frequent)</SelectItem>
+                    <SelectItem value="remove">Remove rows with nulls</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            {/* Summary */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
+              <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+                Processing Summary
+              </h4>
+              {useRawData ? (
+                <div className="text-sm text-blue-800">
+                  <div className="flex items-center gap-2">
+                    <span className="text-green-600">✓</span>
+                    <span>Using raw data - no preprocessing will be applied</span>
+                  </div>
+                </div>
+              ) : (
+                <ul className="text-sm text-blue-800 space-y-1">
+                  {athenaOptions.fixTypos && <li className="flex items-center gap-2"><span className="text-green-600">✓</span>Fix typos and standardize text</li>}
+                  {athenaOptions.standardization && <li className="flex items-center gap-2"><span className="text-green-600">✓</span>Apply data standardization</li>}
+                  {athenaOptions.nullHandling !== 'none' && <li className="flex items-center gap-2"><span className="text-green-600">✓</span>Handle nulls: {athenaOptions.nullHandling}</li>}
+                  {athenaOptions.duplicateRemoval && <li className="flex items-center gap-2"><span className="text-green-600">✓</span>Remove duplicate rows</li>}
+                  {athenaOptions.dataValidation && <li className="flex items-center gap-2"><span className="text-green-600">✓</span>Validate data types</li>}
+                  {athenaOptions.columnNormalization && <li className="flex items-center gap-2"><span className="text-green-600">✓</span>Normalize numeric columns</li>}
+                  {!useRawData && !Object.values(athenaOptions).some(v => v !== false && v !== 'none') && 
+                    <li className="flex items-center gap-2 text-gray-600"><span className="text-gray-400">○</span>No preprocessing options selected</li>
+                  }
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="pt-6 border-t">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowAthenaDialog(false);
+                setUseRawData(false);
+                setAthenaOptions({
+                  fixTypos: false,
+                  standardization: false,
+                  nullHandling: 'none',
+                  duplicateRemoval: false,
+                  dataValidation: false,
+                  columnNormalization: false
+                });
+              }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={async () => {
+                if (useRawData) {
+                  toast({
+                    title: "Raw Data Ready",
+                    description: `${selectedCsvFile?.name} is ready for analysis without preprocessing`,
+                    className: "bg-green-100 border-green-400 text-green-800"
+                  });
+                  setShowAthenaDialog(false);
+                  return;
+                }
+                
+                setIsProcessing(true);
+                
+                try {
+                  let userEmail = currentUser?.email;
+                  if (!userEmail) {
+                    const memberData = localStorage.getItem('currentMember');
+                    const ownerData = localStorage.getItem('currentOwner');
+                    if (memberData) {
+                      userEmail = JSON.parse(memberData).email;
+                    } else if (ownerData) {
+                      userEmail = JSON.parse(ownerData).email;
+                    }
+                  }
+                  
+                  const response = await fetch(`${API_BASE_URL}/api/process-csv`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      bucketName: currentBucket,
+                      fileName: selectedCsvFile?.id,
+                      options: athenaOptions,
+                      userEmail: userEmail
+                    })
+                  });
+                  
+                  if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Processing failed');
+                  }
+                  
+                  const result = await response.json();
+                  setProcessingResults(result.results);
+                  setProcessedCSV(result.processedCSV);
+                  setShowAthenaDialog(false);
+                  setShowResultsDialog(true);
+                  
+                  toast({
+                    title: "Processing Complete!",
+                    description: `${selectedCsvFile?.name} has been successfully processed`,
+                    className: "bg-green-100 border-green-400 text-green-800"
+                  });
+                  
+                } catch (error) {
+                  console.error('CSV processing error:', error);
+                  toast({
+                    title: "Processing Failed",
+                    description: error.message || 'Failed to process CSV file',
+                    className: "bg-red-100 border-red-400 text-red-800"
+                  });
+                } finally {
+                  setIsProcessing(false);
+                }
+              }}
+              disabled={(!useRawData && !Object.values(athenaOptions).some(v => v !== false && v !== 'none')) || isProcessing}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isProcessing ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  Processing...
+                </div>
+              ) : (
+                useRawData ? 'Start Raw Analysis' : 'Start Data Preparation'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Processing Results Dialog */}
+      <Dialog open={showResultsDialog} onOpenChange={setShowResultsDialog}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="pb-4">
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <span className="text-green-600">✓</span>
+              Processing Complete - {selectedCsvFile?.name}
+            </DialogTitle>
+            <p className="text-sm text-gray-600 mt-2">
+              Your CSV file has been successfully processed. Choose what to do with the cleaned data.
+            </p>
+          </DialogHeader>
+          
+          {processingResults && (
+            <div className="space-y-6">
+              {/* Processing Summary */}
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
+                <h4 className="font-semibold text-green-800 mb-3">Processing Summary</h4>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-600">Original rows:</span>
+                    <span className="font-medium ml-2">{processingResults.originalRows}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Processed rows:</span>
+                    <span className="font-medium ml-2">{processingResults.processedRows}</span>
+                  </div>
+                </div>
+                
+                {processingResults.appliedOperations && processingResults.appliedOperations.length > 0 && (
+                  <div className="mt-3">
+                    <span className="text-sm font-medium text-green-800">Applied Operations:</span>
+                    <ul className="text-sm text-green-700 mt-1 space-y-1">
+                      {processingResults.appliedOperations.map((op, index) => (
+                        <li key={index} className="flex items-center gap-2">
+                          <span className="text-green-600">•</span>
+                          {op}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+              
+              {/* Action Options */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-800 mb-3">What would you like to do with the processed data?</h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Replace Original */}
+                  <div className="bg-white p-4 border-2 border-blue-200 rounded-lg hover:border-blue-400 transition-colors cursor-pointer"
+                       onClick={async () => {
+                         try {
+                           // Upload processed CSV to replace original
+                           const blob = new Blob([processedCSV], { type: 'text/csv' });
+                           const file = new File([blob], selectedCsvFile?.name || 'processed.csv', { type: 'text/csv' });
+                           
+                           // Delete original file first
+                           await fetch(`${API_BASE_URL}/api/delete`, {
+                             method: 'DELETE',
+                             headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                               bucketName: currentBucket,
+                               items: [selectedCsvFile?.id],
+                               userEmail: currentUser?.email
+                             })
+                           });
+                           
+                           // Upload processed file
+                           const uploadResponse = await fetch(`${API_BASE_URL}/api/upload-url`, {
+                             method: 'POST',
+                             headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                               bucketName: currentBucket,
+                               fileName: selectedCsvFile?.name,
+                               fileType: 'text/csv',
+                               folderPath: currentPath || '',
+                               userEmail: currentUser?.email
+                             })
+                           });
+                           
+                           const { uploadUrl } = await uploadResponse.json();
+                           await fetch(uploadUrl, { method: 'PUT', body: file });
+                           
+                           setShowResultsDialog(false);
+                           loadFiles();
+                           
+                           toast({
+                             title: "File Replaced",
+                             description: "Original file has been replaced with processed data",
+                             className: "bg-green-100 border-green-400 text-green-800"
+                           });
+                         } catch (error) {
+                           toast({
+                             title: "Replace Failed",
+                             description: "Failed to replace original file",
+                             className: "bg-red-100 border-red-400 text-red-800"
+                           });
+                         }
+                       }}>
+                    <div className="text-center">
+                      <div className="text-2xl mb-2">🔄</div>
+                      <h5 className="font-medium text-blue-800">Replace Original</h5>
+                      <p className="text-xs text-gray-600 mt-1">Overwrite the original file with processed data</p>
+                    </div>
+                  </div>
+                  
+                  {/* Save to Folder */}
+                  <div className="bg-white p-4 border-2 border-green-200 rounded-lg hover:border-green-400 transition-colors cursor-pointer"
+                       onClick={async () => {
+                         try {
+                           const cleanedFileName = selectedCsvFile?.name?.replace('.csv', '_cleaned.csv') || 'processed_cleaned.csv';
+                           const blob = new Blob([processedCSV], { type: 'text/csv' });
+                           const file = new File([blob], cleanedFileName, { type: 'text/csv' });
+                           
+                           const uploadResponse = await fetch(`${API_BASE_URL}/api/upload-url`, {
+                             method: 'POST',
+                             headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                               bucketName: currentBucket,
+                               fileName: cleanedFileName,
+                               fileType: 'text/csv',
+                               folderPath: currentPath || '',
+                               userEmail: currentUser?.email
+                             })
+                           });
+                           
+                           const { uploadUrl } = await uploadResponse.json();
+                           await fetch(uploadUrl, { method: 'PUT', body: file });
+                           
+                           setShowResultsDialog(false);
+                           loadFiles();
+                           
+                           toast({
+                             title: "File Saved",
+                             description: `Processed data saved as ${cleanedFileName}`,
+                             className: "bg-green-100 border-green-400 text-green-800"
+                           });
+                         } catch (error) {
+                           toast({
+                             title: "Save Failed",
+                             description: "Failed to save processed file",
+                             className: "bg-red-100 border-red-400 text-red-800"
+                           });
+                         }
+                       }}>
+                    <div className="text-center">
+                      <div className="text-2xl mb-2">📁</div>
+                      <h5 className="font-medium text-green-800">Save to Folder</h5>
+                      <p className="text-xs text-gray-600 mt-1">Save as new file with '_cleaned' suffix</p>
+                    </div>
+                  </div>
+                  
+                  {/* Download */}
+                  <div className="bg-white p-4 border-2 border-purple-200 rounded-lg hover:border-purple-400 transition-colors cursor-pointer"
+                       onClick={() => {
+                         const cleanedFileName = selectedCsvFile?.name?.replace('.csv', '_cleaned.csv') || 'processed_cleaned.csv';
+                         const blob = new Blob([processedCSV], { type: 'text/csv' });
+                         const url = window.URL.createObjectURL(blob);
+                         const a = document.createElement('a');
+                         a.href = url;
+                         a.download = cleanedFileName;
+                         a.click();
+                         window.URL.revokeObjectURL(url);
+                         
+                         setShowResultsDialog(false);
+                         
+                         toast({
+                           title: "Download Started",
+                           description: `Downloading ${cleanedFileName}`,
+                           className: "bg-green-100 border-green-400 text-green-800"
+                         });
+                       }}>
+                    <div className="text-center">
+                      <div className="text-2xl mb-2">💾</div>
+                      <h5 className="font-medium text-purple-800">Download</h5>
+                      <p className="text-xs text-gray-600 mt-1">Download to your computer</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Preview */}
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h5 className="font-medium text-gray-800 mb-2">Data Preview (First 200 characters)</h5>
+                <pre className="text-xs text-gray-600 bg-white p-3 rounded border overflow-x-auto">
+                  {processedCSV.substring(0, 200)}...
+                </pre>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter className="pt-6 border-t">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowResultsDialog(false);
+                setProcessingResults(null);
+                setProcessedCSV('');
+              }}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Footer */}
       <footer className="bg-white dark:bg-gray-800 border-t dark:border-gray-700 mt-auto transition-colors">

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Plus, Settings, Users, BarChart3, Moon, Sun } from "lucide-react";
+import { Plus, Settings, Users, BarChart3, Moon, Sun, Database } from "lucide-react";
 import { useClerk } from "@clerk/clerk-react";
 import { API_BASE_URL } from '@/config/api';
 import React from "react";
@@ -82,6 +82,7 @@ function OwnerDashboardInner() {
   const [selectedBucketForMembers, setSelectedBucketForMembers] = useState<string>("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+
   // If there's a component error, show error UI
   if (componentError) {
     return (
@@ -398,6 +399,7 @@ function OwnerDashboardInner() {
                             <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setSelectedBucketForMembers(bucket.name); setShowMemberManagement(true); }}>
                               <Users className="h-4 w-4" />
                             </Button>
+
                             <Button size="sm" variant="outline">
                               <Settings className="h-4 w-4" />
                             </Button>
@@ -739,6 +741,8 @@ function OwnerDashboardInner() {
           });
         }}
       />
+
+
       
       {/* Footer */}
       <footer className="bg-white border-t mt-auto">

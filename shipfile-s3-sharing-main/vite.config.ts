@@ -14,7 +14,14 @@ export default defineConfig(({ mode }) => ({
       output: {
         manualChunks: undefined,
       },
+      onwarn(warning, warn) {
+        // Suppress all warnings
+        return;
+      },
     },
+  },
+  esbuild: {
+    logOverride: { 'this-is-undefined-in-esm': 'silent' },
   },
   server: {
     host: "::",
