@@ -17,8 +17,6 @@ import { addPermissionRefreshEndpoint } from './fix_permission_sync_realtime.js'
 import { CSVProcessor } from './csv-processor.js';
 import csvCleanerRouter from './csv-cleaner.js';
 
-dotenv.config();
-
 // Clean environment variables (Railway sometimes adds extra characters)
 if (process.env.SENDGRID_API_KEY) {
   process.env.SENDGRID_API_KEY = process.env.SENDGRID_API_KEY.trim().replace(/^[^S]*/, '');

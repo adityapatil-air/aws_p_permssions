@@ -37,13 +37,14 @@ function fixTypos(data) {
     let changes = 0;
     data.forEach(row => {
         Object.keys(row).forEach(key => {
-            if (typeof row[key] === 'string') {
-                const words = row[key].toLowerCase().split(' ');
+            if (typeof row[key] === 'string' && row[key].length > 0) {
+                const original = row[key];
+                const words = original.split(' ');
                 const fixedWords = words.map(word => {
-                    const cleanWord = word.replace(/[^\w]/g, '');
+                    const cleanWord = word.toLowerCase().replace(/[^a-z]/g, '');
                     if (typos[cleanWord]) {
                         changes++;
-                        return word.replace(cleanWord, typos[cleanWord]);
+                        return word.replace(new RegExp(cleanWord, 'i'), typos[cleanWord]);
                     }
                     return word;
                 });
@@ -65,14 +66,26 @@ function standardizeFormats(data) {
             if (keyLower.includes('email') || keyLower.includes('mail')) {
                 if (row[key] && typeof row[key] === 'string') {
                     let email = row[key].toLowerCase().trim().replace(/\s+/g, '');
-                    if (!email.includes('@') && email.includes('.')) {
-                        email = email.replace('.', '@');
+                    const original = email;
+                    
+                    // Fix common email issues
+                    if (email.includes('gmailcom')) {
+                        email = email.replace('gmailcom', 'gmail.com');
                     }
                     if (email.includes('gmail') && !email.includes('.com')) {
                         email = email.replace('gmail', 'gmail.com');
                     }
-                    row[key] = email;
-                    changes++;
+                    if (email.includes('yahoo') && !email.includes('.com')) {
+                        email = email.replace('yahoo', 'yahoo.com');
+                    }
+                    if (email.includes('outlook') && !email.includes('.com')) {
+                        email = email.replace('outlook', 'outlook.com');
+                    }
+                    
+                    if (email !== original) {
+                        row[key] = email;
+                        changes++;
+                    }
                 }
             }
             
@@ -89,15 +102,40 @@ function standardizeFormats(data) {
             }
             
             // Date standardization
-            if (keyLower.includes('date') || keyLower.includes('time')) {
+            if (keyLower.includes('date') || keyLower.includes('birth') || keyLower.includes('dob')) {
                 if (row[key]) {
-                    try {
-                        const date = new Date(row[key]);
-                        if (!isNaN(date.getTime())) {
-                            row[key] = date.toISOString().split('T')[0];
-                            changes++;
-                        }
-                    } catch (e) {}
+                    const original = row[key];
+                    let standardized = null;
+                    
+                    const dateStr = original.toString();
+                    
+                    // DD/MM/YYYY or MM/DD/YYYY
+                    const dmyMatch = dateStr.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+                    if (dmyMatch) {
+                        const [, part1, part2, year] = dmyMatch;
+                        const day = part1.padStart(2, '0');
+                        const month = part2.padStart(2, '0');
+                        standardized = `${year}-${month}-${day}`;
+                    }
+                    
+                    // YYYY/MM/DD
+                    const ymdMatch = dateStr.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+                    if (ymdMatch) {
+                        const [, year, month, day] = ymdMatch;
+                        standardized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                    }
+                    
+                    // DD-MM-YYYY
+                    const dashMatch = dateStr.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+                    if (dashMatch) {
+                        const [, day, month, year] = dashMatch;
+                        standardized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                    }
+                    
+                    if (standardized && standardized !== original) {
+                        row[key] = standardized;
+                        changes++;
+                    }
                 }
             }
         });
@@ -125,7 +163,16 @@ function handleNulls(data) {
     data.forEach(row => {
         Object.keys(row).forEach(key => {
             if (!row[key] || row[key] === '' || row[key] === null || row[key] === undefined) {
-                row[key] = 'N/A';
+                const keyLower = key.toLowerCase();
+                if (keyLower.includes('email')) {
+                    row[key] = 'unknown@example.com';
+                } else if (keyLower.includes('phone')) {
+                    row[key] = '+91-00000-00000';
+                } else if (keyLower.includes('date')) {
+                    row[key] = '1970-01-01';
+                } else {
+                    row[key] = 'Unknown';
+                }
                 changes++;
             }
         });
@@ -143,13 +190,13 @@ function validateData(data) {
         Object.keys(row).forEach(key => {
             const keyLower = key.toLowerCase();
             
-            if (keyLower.includes('email') && row[key] !== 'N/A') {
+            if (keyLower.includes('email') && row[key] !== 'unknown@example.com') {
                 if (!emailRegex.test(row[key])) {
                     issues.push(`Row ${index + 1}: Invalid email in ${key}`);
                 }
             }
             
-            if (keyLower.includes('phone') && row[key] !== 'N/A') {
+            if (keyLower.includes('phone') && row[key] !== '+91-00000-00000') {
                 if (!phoneRegex.test(row[key])) {
                     issues.push(`Row ${index + 1}: Invalid phone in ${key}`);
                 }
@@ -198,6 +245,7 @@ router.post('/clean', upload.single('csvFile'), async (req, res) => {
         }
         
         const options = JSON.parse(req.body.options || '{}');
+        const originalFileName = req.file.originalname;
         const results = [];
         const summary = {
             originalRows: 0,
@@ -224,7 +272,7 @@ router.post('/clean', upload.single('csvFile'), async (req, res) => {
         summary.originalRows = results.length;
         let data = results;
         
-        // Apply cleaning operations based on options
+        // Apply cleaning operations
         if (options.fixTypos) {
             const result = fixTypos(data);
             data = result.data;
@@ -261,16 +309,17 @@ router.post('/clean', upload.single('csvFile'), async (req, res) => {
         
         summary.finalRows = data.length;
         
-        // Generate cleaned CSV
-        const outputPath = `uploads/cleaned_${Date.now()}.csv`;
-        
+        // Generate cleaned CSV content
+        let csvContent = '';
         if (data.length > 0) {
-            const csvWriter = createObjectCsvWriter({
-                path: outputPath,
-                header: Object.keys(data[0]).map(key => ({ id: key, title: key }))
-            });
-            
-            await csvWriter.writeRecords(data);
+            const headers = Object.keys(data[0]);
+            csvContent = headers.join(',') + '\n';
+            csvContent += data.map(row => 
+                headers.map(header => {
+                    const value = row[header] || '';
+                    return `"${String(value).replace(/"/g, '""')}"`;
+                }).join(',')
+            ).join('\n');
         }
         
         // Clean up uploaded file
@@ -279,33 +328,14 @@ router.post('/clean', upload.single('csvFile'), async (req, res) => {
         res.json({
             success: true,
             summary,
-            downloadUrl: `/api/csv-cleaner/download/${path.basename(outputPath)}`,
-            preview: data.slice(0, 5) // First 5 rows for preview
+            csvContent,
+            originalFileName,
+            preview: data.slice(0, 5)
         });
         
     } catch (error) {
         console.error('CSV cleaning error:', error);
         res.status(500).json({ error: 'Failed to clean CSV file' });
-    }
-});
-
-// Download cleaned file
-router.get('/download/:filename', (req, res) => {
-    const filePath = path.join('uploads', req.params.filename);
-    
-    if (fs.existsSync(filePath)) {
-        res.download(filePath, (err) => {
-            if (!err) {
-                // Delete file after download
-                setTimeout(() => {
-                    if (fs.existsSync(filePath)) {
-                        fs.unlinkSync(filePath);
-                    }
-                }, 5000);
-            }
-        });
-    } else {
-        res.status(404).json({ error: 'File not found' });
     }
 });
 

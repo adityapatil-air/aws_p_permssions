@@ -39,7 +39,8 @@ const CSVCleaner: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<CleaningSummary | null>(null);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [csvContent, setCsvContent] = useState<string | null>(null);
+  const [originalFileName, setOriginalFileName] = useState<string | null>(null);
   const [preview, setPreview] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +50,7 @@ const CSVCleaner: React.FC = () => {
       setFile(selectedFile);
       setError(null);
       setSummary(null);
-      setDownloadUrl(null);
+      setCsvContent(null);
       setPreview(null);
     } else {
       setError('Please select a valid CSV file');
@@ -86,7 +87,8 @@ const CSVCleaner: React.FC = () => {
 
       if (result.success) {
         setSummary(result.summary);
-        setDownloadUrl(result.downloadUrl);
+        setCsvContent(result.csvContent);
+        setOriginalFileName(result.originalFileName);
         setPreview(result.preview);
       } else {
         setError(result.error || 'Failed to clean CSV');
@@ -99,14 +101,61 @@ const CSVCleaner: React.FC = () => {
   };
 
   const downloadFile = () => {
-    if (downloadUrl) {
+    if (csvContent) {
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = `cleaned_${file?.name || 'data.csv'}`;
+      link.href = url;
+      link.download = `cleaned_${originalFileName || 'data.csv'}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
     }
+  };
+
+  const replaceOriginal = () => {
+    if (!csvContent || !originalFileName) return;
+    
+    try {
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Save as cleaned_originalname.csv
+      const baseName = originalFileName.replace('.csv', '');
+      link.download = `cleaned_${baseName}.csv`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      alert('✅ Cleaned file downloaded as cleaned_' + baseName + '.csv');
+    } catch (err) {
+      setError('Failed to replace original file');
+    }
+  };
+
+  const saveToFolder = () => {
+    if (!csvContent || !originalFileName) return;
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    
+    // Extract directory and filename
+    const baseName = originalFileName.replace(/\.csv$/i, '');
+    link.download = `${baseName}_cleaned.csv`;
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    alert('✅ File saved as ' + baseName + '_cleaned.csv');
   };
 
   return (
@@ -241,9 +290,17 @@ const CSVCleaner: React.FC = () => {
                   </div>
                 )}
 
-                <Button onClick={downloadFile} className="w-full" variant="outline">
-                  📥 Download Cleaned CSV
-                </Button>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button onClick={replaceOriginal} variant="destructive" size="sm">
+                    🔄 Replace Original
+                  </Button>
+                  <Button onClick={saveToFolder} variant="outline" size="sm">
+                    📁 Save to Folder
+                  </Button>
+                  <Button onClick={downloadFile} variant="default" size="sm">
+                    📥 Download
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}
