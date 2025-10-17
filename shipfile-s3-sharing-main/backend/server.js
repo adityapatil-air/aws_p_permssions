@@ -13,8 +13,7 @@ import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import { v4 as uuidv4 } from 'uuid';
 import database from './database.js';
-import { addPermissionRefreshEndpoint } from './fix_permission_sync_realtime.js';
-import { CSVProcessor } from './csv-processor.js';
+// Removed unused imports
 import csvCleanerRouter from './csv-cleaner.js';
 
 // Clean environment variables (Railway sometimes adds extra characters)
@@ -3683,146 +3682,12 @@ app.post('/api/test-email', async (req, res) => {
   }
 });
 
-// Process CSV with Athena data preparation
-app.post('/api/athena/process-csv', async (req, res) => {
-  const { bucketName, fileName, options, userEmail } = req.body;
-  
-  console.log('=== ATHENA CSV PROCESSING ===');
-  console.log('Bucket:', bucketName);
-  console.log('File:', fileName);
-  console.log('Options:', options);
-  console.log('User:', userEmail);
-  
-  try {
-    // Get bucket credentials
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
-    
-    if (!bucket) {
-      return res.status(404).json({ error: 'Bucket not found' });
-    }
-    
-    // Download CSV file from S3
-    const s3Client = new S3Client({
-      region: bucket.region,
-      credentials: {
-        accessKeyId: bucket.access_key,
-        secretAccessKey: bucket.secret_key,
-      },
-    });
-    
-    const getCommand = new GetObjectCommand({ Bucket: bucketName, Key: fileName });
-    const response = await s3Client.send(getCommand);
-    
-    // Convert stream to string
-    const csvContent = await streamToString(response.Body);
-    
-    // Process CSV
-    const processor = new CSVProcessor(csvContent);
-    const results = processor.process(options);
-    const processedCSV = processor.getProcessedCSV();
-    
-    console.log('Processing results:', results);
-    
-    res.json({
-      success: true,
-      results: results,
-      processedData: processedCSV,
-      originalSize: csvContent.length,
-      processedSize: processedCSV.length
-    });
-    
-  } catch (error) {
-    console.error('CSV processing error:', error);
-    res.status(500).json({ error: 'Failed to process CSV: ' + error.message });
-  }
-});
-
-// Helper function to convert stream to string
-async function streamToString(stream) {
-  const chunks = [];
-  for await (const chunk of stream) {
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString('utf-8');
-}
-
-// CSV Processing endpoint
-app.post('/api/process-csv', async (req, res) => {
-  const { bucketName, fileName, options, userEmail } = req.body;
-  
-  console.log('=== CSV PROCESSING REQUEST ===');
-  console.log('Bucket:', bucketName);
-  console.log('File:', fileName);
-  console.log('Options:', options);
-  console.log('User:', userEmail);
-  
-  try {
-    // Get bucket credentials
-    const bucket = await new Promise((resolve, reject) => {
-      db.get('SELECT access_key, secret_key, region FROM buckets WHERE name = ?', [bucketName], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
-    
-    if (!bucket) {
-      return res.status(404).json({ error: 'Bucket not found' });
-    }
-    
-    // Download CSV file from S3
-    const s3Client = new S3Client({
-      region: bucket.region,
-      credentials: {
-        accessKeyId: bucket.access_key,
-        secretAccessKey: bucket.secret_key,
-      },
-    });
-    
-    const getCommand = new GetObjectCommand({ Bucket: bucketName, Key: fileName });
-    const response = await s3Client.send(getCommand);
-    
-    // Convert stream to string
-    const chunks = [];
-    for await (const chunk of response.Body) {
-      chunks.push(chunk);
-    }
-    const csvContent = Buffer.concat(chunks).toString('utf-8');
-    
-    console.log('CSV content length:', csvContent.length);
-    
-    // Process CSV
-    const processor = new CSVProcessor(csvContent);
-    const results = processor.process(options);
-    const processedCSV = processor.getProcessedCSV();
-    
-    console.log('Processing results:', results);
-    
-    res.json({
-      success: true,
-      results: results,
-      processedCSV: processedCSV,
-      originalFileName: fileName
-    });
-    
-  } catch (error) {
-    console.error('CSV processing error:', error);
-    res.status(500).json({ 
-      error: 'Failed to process CSV: ' + error.message,
-      details: error.stack
-    });
-  }
-});
+// CSV Processing endpoints removed (using dedicated csv-cleaner router instead)
 
 // Add CSV cleaner API
 app.use('/api/csv-cleaner', csvCleanerRouter);
 
-// Add permission refresh endpoints
-addPermissionRefreshEndpoint(app);
+// Permission refresh endpoints removed (file was deleted)
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

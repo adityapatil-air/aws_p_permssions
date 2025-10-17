@@ -32,23 +32,25 @@ const typos = {
     'harrass': 'harass', 'independant': 'independent', 'intresting': 'interesting'
 };
 
-// Fix typos function
+// Enhanced typo fixing with better accuracy
 function fixTypos(data) {
     let changes = 0;
     data.forEach(row => {
         Object.keys(row).forEach(key => {
             if (typeof row[key] === 'string' && row[key].length > 0) {
                 const original = row[key];
-                const words = original.split(' ');
-                const fixedWords = words.map(word => {
-                    const cleanWord = word.toLowerCase().replace(/[^a-z]/g, '');
-                    if (typos[cleanWord]) {
+                let fixed = original;
+                
+                // Direct word replacement for better accuracy
+                for (const [typo, correct] of Object.entries(typos)) {
+                    const regex = new RegExp(`\\b${typo}\\b`, 'gi');
+                    if (regex.test(fixed)) {
+                        fixed = fixed.replace(regex, correct);
                         changes++;
-                        return word.replace(new RegExp(cleanWord, 'i'), typos[cleanWord]);
                     }
-                    return word;
-                });
-                row[key] = fixedWords.join(' ');
+                }
+                
+                row[key] = fixed;
             }
         });
     });
@@ -62,24 +64,28 @@ function standardizeFormats(data) {
         Object.keys(row).forEach(key => {
             const keyLower = key.toLowerCase();
             
-            // Email standardization
+            // Enhanced email standardization
             if (keyLower.includes('email') || keyLower.includes('mail')) {
                 if (row[key] && typeof row[key] === 'string') {
                     let email = row[key].toLowerCase().trim().replace(/\s+/g, '');
                     const original = email;
                     
-                    // Fix common email issues
-                    if (email.includes('gmailcom')) {
-                        email = email.replace('gmailcom', 'gmail.com');
+                    // Fix missing @ symbol
+                    if (!email.includes('@')) {
+                        // Look for common patterns like "usergmail.com" -> "user@gmail.com"
+                        email = email.replace(/(\w+)(gmail|yahoo|outlook|hotmail)(\.com)?/, '$1@$2.com');
                     }
-                    if (email.includes('gmail') && !email.includes('.com')) {
-                        email = email.replace('gmail', 'gmail.com');
-                    }
-                    if (email.includes('yahoo') && !email.includes('.com')) {
-                        email = email.replace('yahoo', 'yahoo.com');
-                    }
-                    if (email.includes('outlook') && !email.includes('.com')) {
-                        email = email.replace('outlook', 'outlook.com');
+                    
+                    // Fix common domain issues
+                    email = email.replace(/gmailcom/g, 'gmail.com');
+                    email = email.replace(/gmail(?!\.com)/g, 'gmail.com');
+                    email = email.replace(/yahoo(?!\.com)/g, 'yahoo.com');
+                    email = email.replace(/outlook(?!\.com)/g, 'outlook.com');
+                    email = email.replace(/hotmail(?!\.com)/g, 'hotmail.com');
+                    
+                    // Fix missing .com
+                    if (email.includes('@') && !email.includes('.')) {
+                        email = email.replace(/@(gmail|yahoo|outlook|hotmail)$/, '@$1.com');
                     }
                     
                     if (email !== original) {
@@ -101,35 +107,44 @@ function standardizeFormats(data) {
                 }
             }
             
-            // Date standardization
+            // Enhanced date standardization
             if (keyLower.includes('date') || keyLower.includes('birth') || keyLower.includes('dob')) {
                 if (row[key]) {
-                    const original = row[key];
+                    const original = row[key].toString().trim();
                     let standardized = null;
                     
-                    const dateStr = original.toString();
-                    
-                    // DD/MM/YYYY or MM/DD/YYYY
-                    const dmyMatch = dateStr.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-                    if (dmyMatch) {
-                        const [, part1, part2, year] = dmyMatch;
-                        const day = part1.padStart(2, '0');
-                        const month = part2.padStart(2, '0');
-                        standardized = `${year}-${month}-${day}`;
+                    // DD/MM/YYYY (Indian format) - prioritize this
+                    const ddmmyyyyMatch = original.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+                    if (ddmmyyyyMatch) {
+                        const [, day, month, year] = ddmmyyyyMatch;
+                        // Validate day and month ranges
+                        const d = parseInt(day);
+                        const m = parseInt(month);
+                        if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+                            standardized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                        }
                     }
                     
-                    // YYYY/MM/DD
-                    const ymdMatch = dateStr.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
-                    if (ymdMatch) {
-                        const [, year, month, day] = ymdMatch;
-                        standardized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                    // YYYY/MM/DD or YYYY-MM-DD
+                    const yyyymmddMatch = original.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+                    if (yyyymmddMatch && !standardized) {
+                        const [, year, month, day] = yyyymmddMatch;
+                        const m = parseInt(month);
+                        const d = parseInt(day);
+                        if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+                            standardized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                        }
                     }
                     
-                    // DD-MM-YYYY
-                    const dashMatch = dateStr.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-                    if (dashMatch) {
-                        const [, day, month, year] = dashMatch;
-                        standardized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                    // MM-DD-YYYY (US format)
+                    const mmddyyyyMatch = original.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+                    if (mmddyyyyMatch && !standardized) {
+                        const [, month, day, year] = mmddyyyyMatch;
+                        const m = parseInt(month);
+                        const d = parseInt(day);
+                        if (d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+                            standardized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+                        }
                     }
                     
                     if (standardized && standardized !== original) {
@@ -143,18 +158,49 @@ function standardizeFormats(data) {
     return { data, changes };
 }
 
-// Remove duplicates
+// Enhanced duplicate removal with fuzzy matching
 function removeDuplicates(data) {
-    const seen = new Set();
-    const unique = data.filter(row => {
-        const key = JSON.stringify(row);
-        if (seen.has(key)) {
-            return false;
+    if (data.length === 0) return { data, removed: 0 };
+    
+    const unique = [];
+    let removed = 0;
+    
+    for (let i = 0; i < data.length; i++) {
+        const currentRow = data[i];
+        let isDuplicate = false;
+        
+        // Check against existing unique rows
+        for (const uniqueRow of unique) {
+            let matchingFields = 0;
+            let totalFields = 0;
+            
+            // Compare each field
+            for (const key in currentRow) {
+                if (uniqueRow.hasOwnProperty(key)) {
+                    totalFields++;
+                    const val1 = String(currentRow[key]).toLowerCase().trim();
+                    const val2 = String(uniqueRow[key]).toLowerCase().trim();
+                    
+                    if (val1 === val2) {
+                        matchingFields++;
+                    }
+                }
+            }
+            
+            // If 80% or more fields match, consider it a duplicate
+            if (totalFields > 0 && (matchingFields / totalFields) >= 0.8) {
+                isDuplicate = true;
+                removed++;
+                break;
+            }
         }
-        seen.add(key);
-        return true;
-    });
-    return { data: unique, removed: data.length - unique.length };
+        
+        if (!isDuplicate) {
+            unique.push(currentRow);
+        }
+    }
+    
+    return { data: unique, removed };
 }
 
 // Handle null values

@@ -4034,15 +4034,38 @@ export default function FileManager() {
                     }
                   }
                   
-                  const response = await fetch(`${API_BASE_URL}/api/process-csv`, {
+                  // First, download the CSV file from S3
+                  const downloadResponse = await fetch(`${API_BASE_URL}/api/download`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       bucketName: currentBucket,
-                      fileName: selectedCsvFile?.id,
-                      options: athenaOptions,
+                      items: [{ key: selectedCsvFile?.id, name: selectedCsvFile?.name, type: 'file' }],
                       userEmail: userEmail
                     })
+                  });
+                  
+                  if (!downloadResponse.ok) {
+                    throw new Error('Failed to download CSV file');
+                  }
+                  
+                  const csvBlob = await downloadResponse.blob();
+                  
+                  // Create FormData for file upload
+                  const formData = new FormData();
+                  formData.append('csvFile', csvBlob, selectedCsvFile?.name || 'file.csv');
+                  formData.append('options', JSON.stringify({
+                    fixTypos: athenaOptions.fixTypos,
+                    standardizeFormats: athenaOptions.standardization,
+                    removeDuplicates: athenaOptions.duplicateRemoval,
+                    handleNulls: athenaOptions.nullHandling !== 'none',
+                    validateData: athenaOptions.dataValidation,
+                    normalizeData: athenaOptions.columnNormalization
+                  }));
+                  
+                  const response = await fetch(`${API_BASE_URL}/api/csv-cleaner/clean`, {
+                    method: 'POST',
+                    body: formData
                   });
                   
                   if (!response.ok) {
@@ -4051,14 +4074,24 @@ export default function FileManager() {
                   }
                   
                   const result = await response.json();
-                  setProcessingResults(result.results);
-                  setProcessedCSV(result.processedCSV);
+                  setProcessingResults({
+                    originalRows: result.summary.originalRows,
+                    processedRows: result.summary.finalRows,
+                    appliedOperations: [
+                      result.summary.changes.typosFixed > 0 && `Fixed ${result.summary.changes.typosFixed} typos`,
+                      result.summary.changes.formatsStandardized > 0 && `Standardized ${result.summary.changes.formatsStandardized} formats`,
+                      result.summary.changes.duplicatesRemoved > 0 && `Removed ${result.summary.changes.duplicatesRemoved} duplicates`,
+                      result.summary.changes.nullsHandled > 0 && `Handled ${result.summary.changes.nullsHandled} null values`,
+                      result.summary.changes.columnsNormalized > 0 && `Normalized ${result.summary.changes.columnsNormalized} columns`
+                    ].filter(Boolean)
+                  });
+                  setProcessedCSV(result.csvContent);
                   setShowAthenaDialog(false);
                   setShowResultsDialog(true);
                   
                   toast({
                     title: "Processing Complete!",
-                    description: `${selectedCsvFile?.name} has been successfully processed`,
+                    description: `${selectedCsvFile?.name} has been successfully processed. ${result.summary.changes.typosFixed + result.summary.changes.formatsStandardized + result.summary.changes.duplicatesRemoved + result.summary.changes.nullsHandled} changes made.`,
                     className: "bg-green-100 border-green-400 text-green-800"
                   });
                   
@@ -4066,14 +4099,14 @@ export default function FileManager() {
                   console.error('CSV processing error:', error);
                   toast({
                     title: "Processing Failed",
-                    description: error.message || 'Failed to process CSV file',
+                    description: error.message || 'Failed to process CSV file. Please try again.',
                     className: "bg-red-100 border-red-400 text-red-800"
                   });
                 } finally {
                   setIsProcessing(false);
                 }
               }}
-              disabled={(!useRawData && !Object.values(athenaOptions).some(v => v !== false && v !== 'none')) || isProcessing}
+              disabled={isProcessing}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {isProcessing ? (
