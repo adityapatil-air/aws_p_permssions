@@ -4175,68 +4175,38 @@ export default function FileManager() {
                   <div className="bg-white p-4 border-2 border-blue-200 rounded-lg hover:border-blue-400 transition-colors cursor-pointer"
                        onClick={async () => {
                          try {
-                           // Upload processed CSV to replace original
-                           const blob = new Blob([processedCSV], { type: 'text/csv' });
-                           const file = new File([blob], selectedCsvFile?.name || 'processed.csv', { type: 'text/csv' });
+                           // Get user email
+                           let userEmail = currentUser?.email;
+                           if (!userEmail) {
+                             const memberData = localStorage.getItem('currentMember');
+                             const ownerData = localStorage.getItem('currentOwner');
+                             if (memberData) {
+                               userEmail = JSON.parse(memberData).email;
+                             } else if (ownerData) {
+                               userEmail = JSON.parse(ownerData).email;
+                             }
+                           }
+                           
+                           // Create new filename with c_ prefix
+                           const originalName = selectedCsvFile?.name || 'file.csv';
+                           const cleanedFileName = `c_${originalName}`;
                            
                            // Delete original file first
-                           await fetch(`${API_BASE_URL}/api/delete`, {
+                           const deleteResponse = await fetch(`${API_BASE_URL}/api/delete`, {
                              method: 'DELETE',
                              headers: { 'Content-Type': 'application/json' },
                              body: JSON.stringify({
                                bucketName: currentBucket,
                                items: [selectedCsvFile?.id],
-                               userEmail: currentUser?.email
+                               userEmail: userEmail
                              })
                            });
                            
-                           // Upload processed file
-                           const uploadResponse = await fetch(`${API_BASE_URL}/api/upload-url`, {
-                             method: 'POST',
-                             headers: { 'Content-Type': 'application/json' },
-                             body: JSON.stringify({
-                               bucketName: currentBucket,
-                               fileName: selectedCsvFile?.name,
-                               fileType: 'text/csv',
-                               folderPath: currentPath || '',
-                               userEmail: currentUser?.email
-                             })
-                           });
+                           if (!deleteResponse.ok) {
+                             throw new Error('Failed to delete original file');
+                           }
                            
-                           const { uploadUrl } = await uploadResponse.json();
-                           await fetch(uploadUrl, { method: 'PUT', body: file });
-                           
-                           setShowResultsDialog(false);
-                           loadFiles();
-                           
-                           toast({
-                             title: "File Replaced",
-                             description: "Original file has been replaced with processed data",
-                             className: "bg-green-100 border-green-400 text-green-800"
-                           });
-                         } catch (error) {
-                           toast({
-                             title: "Replace Failed",
-                             description: "Failed to replace original file",
-                             className: "bg-red-100 border-red-400 text-red-800"
-                           });
-                         }
-                       }}>
-                    <div className="text-center">
-                      <div className="text-2xl mb-2">🔄</div>
-                      <h5 className="font-medium text-blue-800">Replace Original</h5>
-                      <p className="text-xs text-gray-600 mt-1">Overwrite the original file with processed data</p>
-                    </div>
-                  </div>
-                  
-                  {/* Save to Folder */}
-                  <div className="bg-white p-4 border-2 border-green-200 rounded-lg hover:border-green-400 transition-colors cursor-pointer"
-                       onClick={async () => {
-                         try {
-                           const cleanedFileName = selectedCsvFile?.name?.replace('.csv', '_cleaned.csv') || 'processed_cleaned.csv';
-                           const blob = new Blob([processedCSV], { type: 'text/csv' });
-                           const file = new File([blob], cleanedFileName, { type: 'text/csv' });
-                           
+                           // Upload processed file with new name
                            const uploadResponse = await fetch(`${API_BASE_URL}/api/upload-url`, {
                              method: 'POST',
                              headers: { 'Content-Type': 'application/json' },
@@ -4245,25 +4215,144 @@ export default function FileManager() {
                                fileName: cleanedFileName,
                                fileType: 'text/csv',
                                folderPath: currentPath || '',
-                               userEmail: currentUser?.email
+                               userEmail: userEmail
                              })
                            });
                            
+                           if (!uploadResponse.ok) {
+                             throw new Error('Failed to get upload URL');
+                           }
+                           
                            const { uploadUrl } = await uploadResponse.json();
-                           await fetch(uploadUrl, { method: 'PUT', body: file });
+                           const blob = new Blob([processedCSV], { type: 'text/csv' });
+                           
+                           const putResponse = await fetch(uploadUrl, {
+                             method: 'PUT',
+                             body: blob,
+                             headers: {
+                               'Content-Type': 'text/csv'
+                             }
+                           });
+                           
+                           if (!putResponse.ok) {
+                             throw new Error('Failed to upload processed file');
+                           }
+                           
+                           // Track file ownership
+                           const s3Key = currentPath ? `${currentPath}/${cleanedFileName}` : cleanedFileName;
+                           await fetch(`${API_BASE_URL}/api/files/ownership`, {
+                             method: 'POST',
+                             headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                               bucketName: currentBucket,
+                               fileName: cleanedFileName,
+                               filePath: s3Key,
+                               ownerEmail: userEmail
+                             })
+                           });
+                           
+                           setShowResultsDialog(false);
+                           loadFiles();
+                           
+                           toast({
+                             title: "File Replaced",
+                             description: `Original file replaced with cleaned data as ${cleanedFileName}`,
+                             className: "bg-green-100 border-green-400 text-green-800"
+                           });
+                         } catch (error) {
+                           console.error('Replace error:', error);
+                           toast({
+                             title: "Replace Failed",
+                             description: error.message || "Failed to replace original file",
+                             className: "bg-red-100 border-red-400 text-red-800"
+                           });
+                         }
+                       }}>
+                    <div className="text-center">
+                      <div className="text-2xl mb-2">🔄</div>
+                      <h5 className="font-medium text-blue-800">Replace Original</h5>
+                      <p className="text-xs text-gray-600 mt-1">Replace original with cleaned data (c_filename.csv)</p>
+                    </div>
+                  </div>
+                  
+                  {/* Save to Folder */}
+                  <div className="bg-white p-4 border-2 border-green-200 rounded-lg hover:border-green-400 transition-colors cursor-pointer"
+                       onClick={async () => {
+                         try {
+                           // Get user email
+                           let userEmail = currentUser?.email;
+                           if (!userEmail) {
+                             const memberData = localStorage.getItem('currentMember');
+                             const ownerData = localStorage.getItem('currentOwner');
+                             if (memberData) {
+                               userEmail = JSON.parse(memberData).email;
+                             } else if (ownerData) {
+                               userEmail = JSON.parse(ownerData).email;
+                             }
+                           }
+                           
+                           // Create new filename with c_ prefix
+                           const originalName = selectedCsvFile?.name || 'file.csv';
+                           const cleanedFileName = `c_${originalName}`;
+                           
+                           // Upload processed file (original stays intact)
+                           const uploadResponse = await fetch(`${API_BASE_URL}/api/upload-url`, {
+                             method: 'POST',
+                             headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                               bucketName: currentBucket,
+                               fileName: cleanedFileName,
+                               fileType: 'text/csv',
+                               folderPath: currentPath || '',
+                               userEmail: userEmail
+                             })
+                           });
+                           
+                           if (!uploadResponse.ok) {
+                             throw new Error('Failed to get upload URL');
+                           }
+                           
+                           const { uploadUrl } = await uploadResponse.json();
+                           const blob = new Blob([processedCSV], { type: 'text/csv' });
+                           
+                           const putResponse = await fetch(uploadUrl, {
+                             method: 'PUT',
+                             body: blob,
+                             headers: {
+                               'Content-Type': 'text/csv'
+                             }
+                           });
+                           
+                           if (!putResponse.ok) {
+                             throw new Error('Failed to upload processed file');
+                           }
+                           
+                           // Track file ownership
+                           const s3Key = currentPath ? `${currentPath}/${cleanedFileName}` : cleanedFileName;
+                           await fetch(`${API_BASE_URL}/api/files/ownership`, {
+                             method: 'POST',
+                             headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                               bucketName: currentBucket,
+                               fileName: cleanedFileName,
+                               filePath: s3Key,
+                               ownerEmail: userEmail
+                             })
+                           });
                            
                            setShowResultsDialog(false);
                            loadFiles();
                            
                            toast({
                              title: "File Saved",
-                             description: `Processed data saved as ${cleanedFileName}`,
+                             description: `Processed data saved as ${cleanedFileName}. Original file preserved.`,
                              className: "bg-green-100 border-green-400 text-green-800"
                            });
                          } catch (error) {
+                           console.error('Save error:', error);
                            toast({
                              title: "Save Failed",
-                             description: "Failed to save processed file",
+                             description: error.message || "Failed to save processed file",
                              className: "bg-red-100 border-red-400 text-red-800"
                            });
                          }
@@ -4271,14 +4360,15 @@ export default function FileManager() {
                     <div className="text-center">
                       <div className="text-2xl mb-2">📁</div>
                       <h5 className="font-medium text-green-800">Save to Folder</h5>
-                      <p className="text-xs text-gray-600 mt-1">Save as new file with '_cleaned' suffix</p>
+                      <p className="text-xs text-gray-600 mt-1">Keep original + save cleaned as c_filename.csv</p>
                     </div>
                   </div>
                   
                   {/* Download */}
                   <div className="bg-white p-4 border-2 border-purple-200 rounded-lg hover:border-purple-400 transition-colors cursor-pointer"
                        onClick={() => {
-                         const cleanedFileName = selectedCsvFile?.name?.replace('.csv', '_cleaned.csv') || 'processed_cleaned.csv';
+                         const originalName = selectedCsvFile?.name || 'file.csv';
+                         const cleanedFileName = `c_${originalName}`;
                          const blob = new Blob([processedCSV], { type: 'text/csv' });
                          const url = window.URL.createObjectURL(blob);
                          const a = document.createElement('a');
@@ -4298,7 +4388,7 @@ export default function FileManager() {
                     <div className="text-center">
                       <div className="text-2xl mb-2">💾</div>
                       <h5 className="font-medium text-purple-800">Download</h5>
-                      <p className="text-xs text-gray-600 mt-1">Download to your computer</p>
+                      <p className="text-xs text-gray-600 mt-1">Download c_filename.csv to computer</p>
                     </div>
                   </div>
                 </div>
